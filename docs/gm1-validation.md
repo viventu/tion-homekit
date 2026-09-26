@@ -22,7 +22,7 @@
 | Toolchain | Arduino CLI 1.5.1, Arduino-ESP32 3.3.8, HomeSpan 2.1.8 `107ffc07f4455754ea89068d8cf2e992de3583e6`; пять compile-вариантов `scripts/check.sh`. |
 | APP validation | PASS: ESP32-S3, DIO, 80 МГц, Flash 16 МБ, checksum/hash валидны, размер меньше APP-раздела 3 МБ; строка версии GM1 проверена в бинарнике. |
 | Исходные копии и разметка | PASS: SHA-256 обеих отдельных заводских копий по 16 МиБ совпадает с приватным манифестом. Таблица разделов каждого стика повторно считана перед записью и совпала с таблицей GM1. |
-| Linux/GCC и GitHub Actions | NOT RUN для GM1; запланированы на GitHub. |
+| Linux/GCC и GitHub Actions | PASS: GCC 1381/1381 строк и 948/948 ветвей; GCC/Clang ASan/UBSan/TSan, 17 Python-тестов, clang-tidy и все пять firmware-сборок. [Прогон](https://github.com/viventu/tion-homekit/actions/runs/36236445843) на `ff76b1a`; последующее оформление публикации меняет только Markdown. |
 
 Замороженные бинарники и ELF сохранены локально в `.private/gm1/artifacts/`; манифест исходников и сборки — `.private/gm1/build-manifest.json`. Эти каталоги не входят в публичный снимок. Исходный предыдущий проверенный срез сохранён отдельным commit `5f3e559`.
 
