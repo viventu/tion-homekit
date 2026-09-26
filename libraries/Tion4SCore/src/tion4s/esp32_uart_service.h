@@ -80,6 +80,8 @@ class Esp32UartService final : public ControlChannel {
     void unlock() override { portEXIT_CRITICAL(&mux_); }
 
    private:
+    // ESP-IDF needs the unlocked sentinel; only the host mutex defaults to it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
   };
 
