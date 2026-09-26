@@ -1,0 +1,24 @@
+name: Предложение
+description: Предложить улучшение интеграции или документации
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Задача пользователя
+      description: Что сейчас сложно или невозможно сделать?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое поведение
+      description: Как должен вести себя аксессуар или проект?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Ограничения и подтверждения
+      description: Укажите модель/версию Tion и доступные источники без приватных данных.
+    validations:
+      required: false

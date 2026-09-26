@@ -1,0 +1,18 @@
+# Происхождение зависимостей
+
+Это инвентаризация закреплённых прямых зависимостей и источников протокола. Она не заменяет полный SBOM связанного ESP32-бинарника. Собственный код доступен по [0BSD](../LICENSE); сторонние компоненты и тестовые данные сохраняют свои лицензии и уведомления. Разрешение 0BSD не отменяет обязательств по MIT и лицензиям ESP32 SDK при распространении бинарника.
+
+| Компонент | Версия / источник | Использование и лицензия |
+| --- | --- | --- |
+| HomeSpan | 2.1.8, commit `107ffc07f4455754ea89068d8cf2e992de3583e6`, [источник](https://github.com/HomeSpan/HomeSpan/tree/107ffc07f4455754ea89068d8cf2e992de3583e6) | Линкуется с HomeKit-образом, MIT; полный текст сохранён в [HomeSpan-LICENSE.txt](HomeSpan-LICENSE.txt) |
+| Arduino-ESP32 | 3.3.8, [package.json](https://github.com/espressif/arduino-esp32/blob/3.3.8/package.json), [Arduino.h](https://github.com/espressif/arduino-esp32/blob/3.3.8/cores/esp32/Arduino.h) | Framework, metadata/header указывают LGPL-2.1-or-later; пакет также содержит компоненты с собственными notices |
+| ESP-IDF / SDK | 5.5.4 в Arduino core 3.3.8, [релиз](https://github.com/espressif/arduino-esp32/releases/tag/3.3.8) | Статические компоненты SDK, включая криптографию, имеют отдельные лицензии; полный состав конкретного ELF нужно инвентаризировать перед распространением бинарников |
+| Arduino CLI | 1.5.1, commit `01f3d4f2b`, [релиз и checksums](https://github.com/arduino/arduino-cli/releases/tag/v1.5.1) | Инструмент сборки, в прошивку не входит. Четыре SHA-256 из официального `1.5.1-checksums.txt` сохранены в [манифесте](arduino-cli-1.5.1.sha256) и проверяются до распаковки |
+| Arduino ctags | 5.8-arduino11, commit `abc8fca7499f44c725122881cd380a88c37abe0e`, [источник](https://github.com/arduino/ctags/tree/abc8fca7499f44c725122881cd380a88c37abe0e) | Только инструмент сборки. Скрипт macOS переименовывает конфликтующий макрос и собирает локальный бинарник; исходный пакет сохраняется. Инструмент не распространяется в этом репозитории |
+| Tion protocol / vectors | `dentra/esphome-tion` commit `5d1c5b4b148b1f985874b105793ba4520dc1b429` | Самостоятельный codec по изученному формату и заимствованные тестовые пакеты, MIT; [notice](tion-4s-NOTICE.md) |
+| `esp32_usb_dis` | `dentra/esphome-components` commit `b63386eba2beb545dd41027cdfdf9b08737ccafd` | Изученный способ освобождения GPIO19/20; исходник компонента не включён и не линкуется |
+| GitHub checkout action | v4.2.2, commit `11bd71901bbe5b1630ceea73d27597364c9af683`, [источник](https://github.com/actions/checkout/tree/11bd71901bbe5b1630ceea73d27597364c9af683) | Только CI, закреплён по полному commit; write permissions и сохранение credentials выключены |
+
+Сборочные скрипты проверяют версию/commit CLI, версию core и полный commit **чистого** HomeSpan. Arduino Board Manager устанавливает core и его инструменты из package index; этот проект не содержит полного криптографического lockfile каждого файла установленного SDK. Компиляция на другом OS/compiler runner и в другом каталоге не объявляется побайтно воспроизводимой. Для аппаратного допуска связывают commit проекта, версии инструментария, FQBN и SHA-256 конкретных бинарников; сохранённые исторические хэши не заменяются хэшем новой сборки.
+
+Перед публикацией `.bin`/`.elf` нужны полный список реально связанных компонентов, их notices и проверка требований распространения для каждой лицензии. [Порядок бинарной проверки](../docs/binary-compliance.md) отделяет этот gate от исходного репозитория. До завершения этого пункта бинарный релиз закрыт. Перенос кода из нового upstream требует обновления этой таблицы, notices и `docs/evidence.md`.

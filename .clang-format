@@ -1,0 +1,6 @@
+# Reference style for C++ sources. Files written or rewritten after this file
+# was added follow it; older files keep their manual wrapping until a separate
+# formatting-only change, so CI does not enforce it yet.
+BasedOnStyle: Google
+ColumnLimit: 90
+SortIncludes: Never

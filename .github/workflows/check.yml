@@ -1,0 +1,87 @@
+name: Host and compile checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: host (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check public source tree
+        if: matrix.compiler == 'g++'
+        run: python3 scripts/prepare-public-snapshot.py
+      - name: Lint shell, Python and whitespace
+        if: matrix.compiler == 'g++'
+        run: |
+          for script in scripts/*.sh; do bash -n "$script"; done
+          python3 -m py_compile scripts/*.py tests/*.py
+          git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+      # Ubuntu 24.04 ships clang 18 without its sanitizer runtimes.
+      - name: Install clang sanitizer runtimes and clang-tidy
+        if: matrix.compiler == 'clang++'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libclang-rt-18-dev clang-tidy
+      # The g++ leg also requires every measured line and branch to run.
+      - name: Host tests under ASan, UBSan and TSan
+        env:
+          CXX: ${{ matrix.compiler }}
+          COVERAGE: ${{ matrix.compiler == 'g++' && '--coverage' || '' }}
+        run: scripts/test-host.sh $COVERAGE
+      - name: clang-tidy
+        if: matrix.compiler == 'clang++'
+        run: |
+          python3 -c "import json; print('\n'.join(sorted({e['file'] for e in json.load(open('.build/host/compile_commands.json'))})))" |
+            xargs clang-tidy -p .build/host --quiet
+
+  firmware:
+    needs: host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ARDUINO_CLI: ${{ github.workspace }}/.arduino/bin/arduino-cli
+      ARDUINO_CLI_CONFIG: ${{ github.workspace }}/.arduino/arduino-cli.yaml
+      HOMESPAN_LIBRARY_DIR: ${{ github.workspace }}/.arduino/libraries
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # The pinned toolchain is several GB. Downloaded archives are not cached;
+      # check_toolchain still verifies CLI, core and a clean HomeSpan commit.
+      - name: Restore pinned toolchain
+        id: toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            .arduino/bin
+            .arduino/data
+            .arduino/user
+            .arduino/libraries
+            .arduino/arduino-cli.yaml
+          key: toolchain-${{ runner.os }}-${{ hashFiles('scripts/install-toolchain.sh', 'scripts/toolchain.sh', 'third_party/arduino-cli-1.5.1.sha256') }}
+      - name: Install pinned toolchain
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: scripts/install-toolchain.sh
+      - name: Compile every firmware variant without hardware
+        env:
+          TION_SKIP_HOST_TESTS: 1
+        run: scripts/check.sh

@@ -1,0 +1,3 @@
+#pragma once
+#define CONFIG_IDF_TARGET_ESP32S3 1
+#define ARDUINO_USB_CDC_ON_BOOT 0

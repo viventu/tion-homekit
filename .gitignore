@@ -1,0 +1,14 @@
+.build/
+.arduino/
+.private/
+*.bin
+*.elf
+*.map
+*.uf2
+secrets.*
+*.nvs
+*.dump
+*.pcap
+*.pcapng
+__pycache__/
+*.pyc
