@@ -4,7 +4,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Для уязвимостей используйте SECURITY.md. Не прикладывайте пароли, коды сопряжения, NVS, полный Flash, MAC и необработанную страницу диагностики.
+        Для уязвимостей используйте [приватную форму](https://github.com/viventu/tion-homekit/security/advisories/new). Не прикладывайте пароли, коды сопряжения, NVS, полный Flash, MAC и необработанную страницу диагностики.
   - type: input
     id: version
     attributes:
