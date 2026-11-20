@@ -98,6 +98,8 @@ void append_uart_diagnostics(String& html) {
   append_row(html, "Valid states", "%lu", static_cast<unsigned long>(device.state_count));
   append_row(html, "Pending state replies", "%lu",
              static_cast<unsigned long>(status.state_reads_pending));
+  append_row(html, "Lost state replies", "%lu",
+             static_cast<unsigned long>(status.lost_state_replies));
   append_row(html, "State age (ms)", "%lu", static_cast<unsigned long>(device.age_ms));
   append_row(html, "State fresh", "%u", static_cast<unsigned>(device.fresh));
   append_row(html, "Rejected frames", "%lu", static_cast<unsigned long>(status.rejected_frames));

@@ -68,8 +68,10 @@ struct UartStatus {
   std::uint32_t tx_failures = 0;
   std::uint32_t first_heartbeat_after_boot_ms = 0;
   // Replies owed by state reads. Commands cannot start another read until
-  // these are drained; a missing reply keeps writes closed, even after retry.
+  // these are drained. A reply that has not arrived within
+  // UartCore::kLostStateReplyMs is counted as lost and no longer owed.
   std::uint32_t state_reads_pending = 0;
+  std::uint32_t lost_state_replies = 0;
   // The last command that reached the transaction and where it stands.
   ControlCommand control_command{};
   ControlPhase control_phase = ControlPhase::Idle;
@@ -120,6 +122,10 @@ class ControlChannel {
 class UartCore {
  public:
   static constexpr std::uint32_t kPartialFrameTimeoutMs = 250;
+  // The breezer answers a state read within tens of milliseconds. After this
+  // long the answer is lost (noise, CRC error or a failed TX) and a new read
+  // may start; otherwise one lost answer would block every later command.
+  static constexpr std::uint32_t kLostStateReplyMs = 2000;
   static constexpr unsigned kReceiveBudget = 128;
 
   explicit UartCore(StatusLock& lock) : lock_(lock) {}
@@ -151,6 +157,8 @@ class UartCore {
   void transmit_requests(UartPort& port);
   bool take_waiting_command(Pending& next);
   void start_waiting_command(std::uint32_t now_ms);
+  void expire_lost_state_reads(std::uint32_t now_ms);
+  void count_state_read(std::uint32_t now_ms);
   void transmit_control(UartPort& port);
   void settle();
   bool command_waiting();
@@ -169,6 +177,8 @@ class UartCore {
   std::uint32_t tx_failures_ = 0;
   std::uint32_t first_heartbeat_ms_ = 0;
   std::uint32_t state_reads_pending_ = 0;
+  std::uint32_t last_state_read_ms_ = 0;
+  std::uint32_t lost_state_replies_ = 0;
   bool input_pending_ = false;
   bool command_running_ = false;
 

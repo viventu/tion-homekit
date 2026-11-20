@@ -119,12 +119,26 @@ void UartCore::service(UartPort& port) {
   session_.tick(port.now_ms());
   flush_idle_input(port.now_ms());
   receive(port);
+  expire_lost_state_reads(port.now_ms());
   settle();
   transmit_requests(port);
   start_waiting_command(port.now_ms());
   transmit_control(port);
   settle();
   publish(port.now_ms());
+}
+
+void UartCore::expire_lost_state_reads(std::uint32_t now_ms) {
+  if (state_reads_pending_ != 0 && now_ms - last_state_read_ms_ > kLostStateReplyMs) {
+    lost_state_replies_ = saturating_add(lost_state_replies_, state_reads_pending_);
+    state_reads_pending_ = 0;
+  }
+}
+
+void UartCore::count_state_read(std::uint32_t now_ms) {
+  // Count even a failed TX: it may have reached the device in full.
+  state_reads_pending_ = saturating_add(state_reads_pending_, 1);
+  last_state_read_ms_ = now_ms;
 }
 
 void UartCore::flush_idle_input(std::uint32_t now_ms) {
@@ -190,8 +204,7 @@ void UartCore::transmit_requests(UartPort& port) {
     std::uint8_t bytes[kRequestFrameSize];
     encode_request(static_cast<FrameType>(request), bytes);
     if (request == Request::State) {
-      // Count even a failed TX: it may have reached the device in full.
-      state_reads_pending_ = saturating_add(state_reads_pending_, 1);
+      count_state_read(port.now_ms());
     }
     if (!port.write_all(bytes, sizeof(bytes))) {
       ++tx_failures_;
@@ -236,11 +249,13 @@ void UartCore::transmit_control(UartPort& port) {
   if (output.step == ControlStep::Read || output.step == ControlStep::Verify) {
     // All state reads share one stream, including periodic polls and retries
     // from earlier commands. Never let their delayed answers become the
-    // baseline or confirmation of a new read. next() still ages the intent.
-    if (state_reads_pending_ != 0) {
+    // baseline of a new pre-read; next() still ages the intent. Verification
+    // may overlap its own earlier reads: every answer to them was produced
+    // after the write, so a late one is still valid evidence.
+    if (output.step == ControlStep::Read && state_reads_pending_ != 0) {
       return;
     }
-    state_reads_pending_ = 1;
+    count_state_read(port.now_ms());
   }
   if (!port.write_all(output.bytes, output.size)) {
     ++tx_failures_;
@@ -291,6 +306,7 @@ void UartCore::publish(std::uint32_t now_ms) {
   status_.tx_failures = tx_failures_;
   status_.first_heartbeat_after_boot_ms = first_heartbeat_ms_;
   status_.state_reads_pending = state_reads_pending_;
+  status_.lost_state_replies = lost_state_replies_;
   status_.control_command = control_.command();
   status_.control_phase = control_.phase();
   status_.control_failure = control_.failure();

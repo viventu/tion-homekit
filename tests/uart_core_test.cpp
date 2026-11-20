@@ -393,6 +393,43 @@ void test_unsolicited_state_does_not_underflow_read_count() {
 
 }  // namespace
 
+void test_lost_state_reply_expires() {
+  Bench bench;
+  bench.run(4000);
+  bench.tion.respond = false;
+  for (unsigned pass = 0; pass < 500 && bench.status().state_reads_pending == 0; ++pass) {
+    bench.run(10);
+  }
+  CHECK(bench.status().state_reads_pending == 1, "an unanswered periodic read is outstanding");
+  bench.tion.respond = true;
+  const auto ticket = bench.submit(ControlCommand::speed_step(4));
+  bench.settle_until_idle();
+  const auto status = bench.status();
+  CHECK(bench.outcome(ticket) == CommandOutcome::Applied && bench.tion.state.fan_speed == 4 &&
+            status.lost_state_replies == 1 && status.control_failed == 0,
+        "the lost reply is counted and the command is applied");
+}
+
+void test_lost_verification_reply() {
+  Bench bench;
+  bench.run(4000);
+  const auto ticket = bench.submit(ControlCommand::speed_step(4));
+  for (unsigned pass = 0; pass < 300 && bench.tion.writes == 0; ++pass) {
+    bench.run(10);
+  }
+  bench.tion.respond = false;
+  const auto requests = bench.tion.state_requests;
+  for (unsigned pass = 0; pass < 300 && bench.tion.state_requests == requests; ++pass) {
+    bench.run(10);
+  }
+  bench.tion.respond = true;
+  bench.settle_until_idle();
+  bench.run(3000);
+  CHECK(bench.outcome(ticket) == CommandOutcome::Applied && bench.tion.writes == 1 &&
+            bench.status().lost_state_replies == 1,
+        "the first verification answer is lost and the next one confirms the write");
+}
+
 int main() {
   test_idle_status_is_never_older_than_the_command();
   test_boot_and_heartbeat_priority();
@@ -412,5 +449,7 @@ int main() {
   test_stall_guard_limits();
   test_status_samples_clock_under_lock();
   test_unsolicited_state_does_not_underflow_read_count();
+  test_lost_state_reply_expires();
+  test_lost_verification_reply();
   std::cout << "UART core scheduling and recovery: PASS\n";
 }
