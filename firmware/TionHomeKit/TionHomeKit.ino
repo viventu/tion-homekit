@@ -18,9 +18,9 @@
 namespace {
 
 #if defined(TION_ENABLE_WEB_DIAGNOSTICS)
-constexpr char kVersion[] = "0.2.0-gm1-diag";
+constexpr char kVersion[] = "0.2.1-diag";
 #else
-constexpr char kVersion[] = "0.2.0-gm1";
+constexpr char kVersion[] = "0.2.1";
 #endif
 tion4s::Esp32UartService tion_uart;
 tion_homekit::ControlAccess control_access(tion_uart);
