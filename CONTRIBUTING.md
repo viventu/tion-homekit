@@ -32,4 +32,4 @@ git diff --check
 
 Аппаратные испытания выполняются по [плану проверок](docs/one-visit-test.md) после [подготовки оборудования](docs/hardware.md). Fuzzing на реальном бризере, изменение eFuse и прошивки контроллера Tion не входят в тестовый процесс проекта.
 
-Выпуски готовятся по [инструкции сопровождающего](docs/releasing.md). Правила общения — в [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Правила общения — в [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
