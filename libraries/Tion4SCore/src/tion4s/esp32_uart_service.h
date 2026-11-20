@@ -59,6 +59,7 @@ class Esp32UartService final : public ControlChannel {
   PlatformStatus platform_status() const;
   std::uint32_t submit(const ControlCommand& command, bool allow_legacy_02d0,
                        std::uint32_t expected_failures) override;
+  bool cancel(std::uint32_t ticket) override;
 
  private:
   static constexpr uart_port_t kUartPort = UART_NUM_1;

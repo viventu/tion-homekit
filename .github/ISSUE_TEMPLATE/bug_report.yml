@@ -9,7 +9,7 @@ body:
     id: version
     attributes:
       label: Версия образа
-      description: Например, 0.2.0-gm1; если версия неизвестна, так и напишите.
+      description: Например, 0.2.1; если версия неизвестна, так и напишите.
     validations:
       required: true
   - type: input

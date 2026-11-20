@@ -29,6 +29,7 @@ class HostChannel final : public tion4s::ControlChannel, private tion4s::Clock {
     ++submitted;
     return core_.submit(command, allow_legacy_02d0, expected_failures, clock_);
   }
+  bool cancel(std::uint32_t ticket) override { return core_.cancel(ticket); }
 
   mutable std::function<void()> after_status;
   unsigned submitted = 0;

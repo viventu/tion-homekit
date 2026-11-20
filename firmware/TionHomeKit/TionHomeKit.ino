@@ -18,9 +18,9 @@
 namespace {
 
 #if defined(TION_ENABLE_WEB_DIAGNOSTICS)
-constexpr char kVersion[] = "0.2.0-gm1-diag";
+constexpr char kVersion[] = "0.2.1-diag";
 #else
-constexpr char kVersion[] = "0.2.0-gm1";
+constexpr char kVersion[] = "0.2.1";
 #endif
 tion4s::Esp32UartService tion_uart;
 tion_homekit::ControlAccess control_access(tion_uart);
@@ -98,6 +98,8 @@ void append_uart_diagnostics(String& html) {
   append_row(html, "Valid states", "%lu", static_cast<unsigned long>(device.state_count));
   append_row(html, "Pending state replies", "%lu",
              static_cast<unsigned long>(status.state_reads_pending));
+  append_row(html, "Lost state replies", "%lu",
+             static_cast<unsigned long>(status.lost_state_replies));
   append_row(html, "State age (ms)", "%lu", static_cast<unsigned long>(device.age_ms));
   append_row(html, "State fresh", "%u", static_cast<unsigned>(device.fresh));
   append_row(html, "Rejected frames", "%lu", static_cast<unsigned long>(status.rejected_frames));
@@ -117,6 +119,8 @@ void append_uart_diagnostics(String& html) {
              static_cast<unsigned long>(status.control_failed));
   append_row(html, "Control unchanged", "%lu",
              static_cast<unsigned long>(status.control_unchanged));
+  append_row(html, "Context-bound failures", "%lu",
+             static_cast<unsigned long>(status.context_failed));
 
   if (device.has_device_info) {
     const auto& info = device.device_info;

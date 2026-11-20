@@ -824,6 +824,19 @@ void test_control_transaction_02d0() {
             uncertain.failure() == ControlFailure::VerifyTimeout,
         "unconfirmed write expires without replay");
 
+  tion4s::ControlTransaction queued;
+  CHECK(queued.submit(command, snapshot, true, 100) && queued.cancel_before_write() &&
+            queued.phase() == ControlPhase::Cancelled && !queued.busy(),
+        "a command is cancelled before its pre-read");
+  tion4s::ControlTransaction late;
+  CHECK(late.submit(command, snapshot, true, 100), "late cancellation scenario starts");
+  late.sent(late.next(100).step, 100);
+  late.observe(frame, 120);
+  late.sent(late.next(120).step, 121);
+  CHECK(late.phase() == ControlPhase::Writing && !late.cancel_before_write() &&
+            late.phase() == ControlPhase::Writing,
+        "a command whose write has left is not cancelled");
+
   auto boosted = snapshot;
   boosted.state.fan_speed = 6;
   const auto restore =
@@ -837,6 +850,23 @@ void test_control_transaction_02d0() {
             blocked.phase() == ControlPhase::Failed &&
             blocked.failure() == ControlFailure::ContextChanged,
         "native speed change cancels boost restoration before write");
+}
+
+void test_failures_before_write() {
+  // Keep the constexpr classification exercised at runtime under Clang too.
+  bool (*volatile failed_before_write)(ControlFailure) = tion4s::failed_before_write;
+  CHECK(failed_before_write(ControlFailure::UnsupportedDevice) &&
+            failed_before_write(ControlFailure::StaleState) &&
+            failed_before_write(ControlFailure::ContextChanged) &&
+            failed_before_write(ControlFailure::Refused) &&
+            failed_before_write(ControlFailure::ReadTimeout) &&
+            failed_before_write(ControlFailure::Expired),
+        "failures before the write left nothing on the breezer");
+  CHECK(!failed_before_write(ControlFailure::None) &&
+            !failed_before_write(ControlFailure::VerifyTimeout) &&
+            !failed_before_write(ControlFailure::NotApplied) &&
+            !failed_before_write(ControlFailure::Transport),
+        "after a write, or a transport failure, the result is unknown");
 }
 
 void test_control_admission() {
@@ -1175,6 +1205,7 @@ int main() {
   test_describe();
   test_device_policy();
   test_control_transaction_02d0();
+  test_failures_before_write();
   test_control_admission();
   test_unchanged_and_timeouts();
   test_transaction_request_ids();

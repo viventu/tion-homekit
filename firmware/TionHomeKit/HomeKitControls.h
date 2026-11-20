@@ -254,7 +254,7 @@ class BoostSwitch final : public Service::Switch {
       return true;
     }
     if (!on_->getNewVal()) {
-      timer_.stop(millis());
+      timer_.stop();
       return true;
     }
     return timer_.start(millis());

@@ -13,6 +13,12 @@ bool ControlTransaction::write_sent() const {
   return phase_ == ControlPhase::Writing || phase_ == ControlPhase::Verifying;
 }
 
+bool ControlTransaction::cancel_before_write() {
+  if (phase_ != ControlPhase::Queued && phase_ != ControlPhase::Reading) return false;
+  phase_ = ControlPhase::Cancelled;
+  return true;
+}
+
 void ControlTransaction::fail(ControlFailure reason, WriteRejection refusal) {
   phase_ = ControlPhase::Failed;
   failure_ = reason;
@@ -36,7 +42,9 @@ bool ControlTransaction::context_matches(const State& state) const {
   const auto& context = *command_.context;
   return state.power_on && state.fan_speed == context.fan_speed &&
          state.gate_position == context.gate_position &&
-         state.heater_allowed == context.heater_allowed;
+         (!context.heater_allowed || state.heater_allowed == *context.heater_allowed) &&
+         (!context.target_temperature ||
+          state.target_temperature == *context.target_temperature);
 }
 
 ControlOutput ControlTransaction::read_request(ControlStep step) const {

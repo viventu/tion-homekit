@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace {
@@ -36,6 +37,15 @@ struct Bench {
     }
   }
   void run_uart_only(std::uint32_t ms) { fake::run(core, tion, fake_millis, ms); }
+  // Loop passes until a command is in the mailbox: the next UART pass
+  // starts its pre-read.
+  bool run_until_submitted() {
+    for (int pass = 0; pass < 20000; ++pass) {
+      if (status().waiting_ticket != 0) return true;
+      run(10);
+    }
+    return false;
+  }
 };
 
 tion4s::Snapshot valid_snapshot() {
@@ -161,7 +171,7 @@ void test_boost_manual_stop_and_native_change() {
   bench.run(4000);
   CHECK(bench.boost.start(fake_millis), "boost starts");
   bench.run(2000);
-  bench.boost.stop(fake_millis);
+  bench.boost.stop();
   bench.run(2000);
   CHECK(!bench.boost_on && bench.tion.state.fan_speed == 3,
         "switching off restores at once");
@@ -191,18 +201,13 @@ void test_boost_refusals_and_failure() {
   bench.tion.apply_writes = false;
   CHECK(bench.access.submit(ControlCommand::sound(false)), "unrelated command starts");
   bench.run(3000);
-  CHECK(bench.status().control_failed == 1 && !bench.boost_on && bench.tion.writes == 2,
-        "an unrelated failure cancels a running boost immediately");
+  CHECK(bench.status().control_failed == 1 && bench.boost_on && bench.tion.writes == 2,
+        "another command's failure does not end the boost");
   bench.tion.apply_writes = true;
-  bench.run(BoostTimer::kDurationMs + 3000);
-  CHECK(!bench.boost_on && bench.tion.state.fan_speed == 6 && bench.tion.writes == 2,
-        "a failed command cancels this boost and its automatic restore");
-
-  bench.tion.state.fan_speed = 3;
-  bench.run(3000);
-  bench.tion.apply_writes = true;
-  bench.run(31 * 60 * 1000);
-  CHECK(bench.boost.start(fake_millis), "new boost works after failure and thirty minutes");
+  bench.run(BoostTimer::kDurationMs);
+  CHECK(!bench.boost_on && bench.tion.state.fan_speed == 3 && bench.tion.writes == 3,
+        "the previous speed still returns after five minutes");
+  CHECK(bench.boost.start(fake_millis), "a new boost works after the failure");
 }
 
 // The boost result must come from its own command even when another command
@@ -227,7 +232,7 @@ void test_boost_start_conditions() {
   fake_millis = 1000;
   Bench bench;
   bench.run(4000);
-  bench.boost.stop(fake_millis);
+  bench.boost.stop();
   bench.run(100);
   CHECK(!bench.boost_on && bench.tion.writes == 0, "stopping an idle boost does nothing");
   bench.tion.state.fan_speed = 0;
@@ -252,11 +257,11 @@ void start_boost(Bench& bench) {
   CHECK(bench.boost_on && bench.tion.state.fan_speed == 6, "boost runs");
 }
 
-void test_boost_ends_when_the_mode_changes() {
+// Only airflow changed elsewhere ends a boost without its restore.
+void test_boost_ends_when_the_airflow_changes() {
   const std::vector<void (*)(tion4s::State&)> changes = {
       [](tion4s::State& state) { state.power_on = false; },
       [](tion4s::State& state) { state.gate_position = 1; },
-      [](tion4s::State& state) { state.heater_allowed = true; },
   };
   for (const auto change : changes) {
     fake_millis = 1000;
@@ -266,15 +271,31 @@ void test_boost_ends_when_the_mode_changes() {
     change(bench.tion.state);
     bench.run(BoostTimer::kDurationMs + 3000);
     CHECK(!bench.boost_on && bench.tion.writes == 1,
-          "power, gate or heat changed natively: the boost ends without a restore");
+          "power or gate changed natively: the boost ends without a restore");
   }
+
   fake_millis = 1000;
-  Bench bench;
-  bench.run(4000);
-  start_boost(bench);
-  bench.tion.respond = false;
-  bench.run(11000);
-  CHECK(!bench.boost_on, "a boost whose state went stale ends");
+  Bench heat;
+  heat.run(4000);
+  start_boost(heat);
+  heat.tion.state.heater_allowed = true;
+  heat.run(BoostTimer::kDurationMs + 3000);
+  CHECK(!heat.boost_on && heat.tion.state.fan_speed == 3 && heat.tion.state.heater_allowed &&
+            heat.tion.writes == 2,
+        "heat is not airflow: the previous speed returns and heat stays");
+
+  fake_millis = 1000;
+  Bench stale;
+  stale.run(4000);
+  start_boost(stale);
+  stale.tion.respond = false;
+  stale.run(11000);
+  CHECK(stale.boost_on && stale.tion.state.fan_speed == 6,
+        "stale telemetry decides nothing: the boost keeps running");
+  stale.tion.respond = true;
+  stale.run(BoostTimer::kDurationMs);
+  CHECK(!stale.boost_on && stale.tion.state.fan_speed == 3,
+        "the restore follows once the state is fresh again");
 }
 
 void test_boost_restore_rules() {
@@ -283,7 +304,7 @@ void test_boost_restore_rules() {
   bench.run(4000);
   start_boost(bench);
   CHECK(bench.access.submit(ControlCommand::led(false)) != 0, "another command");
-  bench.boost.stop(fake_millis);
+  bench.boost.stop();
   bench.run(20);
   CHECK(bench.status().control_pending && bench.tion.state.fan_speed == 6,
         "the restore waits for the other command");
@@ -292,21 +313,85 @@ void test_boost_restore_rules() {
         "then the previous step returns");
 
   start_boost(bench);
-  bench.boost.stop(fake_millis);
-  bench.run_uart_only(BoostTimer::kRestoreWindowMs + 1000);  // The loop stalled.
+  bench.boost.stop();
+  auto stale = bench.status();
+  stale.device.fresh = false;
+  CHECK(!bench.boost.tick(stale, fake_millis) && bench.status().waiting_ticket == 0,
+        "no restore is sent from stale telemetry");
+  bench.run_uart_only(11000);  // The loop stalled.
   bench.run(3000);
-  CHECK(!bench.boost_on && bench.tion.state.fan_speed == 6,
-        "a restore that could not start within ten seconds is dropped");
+  CHECK(!bench.boost_on && bench.tion.state.fan_speed == 3,
+        "a late restore still returns the previous speed");
+
+  CHECK(bench.boost.start(fake_millis), "boost starts");
+  bench.boost.stop();
+  bench.run(3000);
+  CHECK(!bench.boost_on && bench.tion.state.fan_speed == 3,
+        "switching off before the speed-up is confirmed still restores");
 
   bench.tion.state.fan_speed = 3;
   bench.run(3000);
   start_boost(bench);
-  bench.boost.stop(fake_millis);
+  bench.boost.stop();
   bench.tion.state.fan_speed = 4;  // Native change before the restore.
   bench.run_uart_only(3000);
   bench.run(3000);
   CHECK(!bench.boost_on && bench.tion.state.fan_speed == 4,
         "a restore never overrides a native change");
+}
+
+// A failed restore is tried again; a restore that keeps failing stops.
+void test_boost_restore_retries() {
+  fake_millis = 1000;
+  Bench once;
+  once.run(4000);
+  start_boost(once);
+  once.boost.stop();
+  once.tion.apply_writes = false;
+  for (int pass = 0; pass < 300 && once.tion.writes < 2; ++pass) once.run(10);
+  once.tion.apply_writes = true;
+  once.run(10000);
+  CHECK(!once.boost_on && once.tion.state.fan_speed == 3 && once.tion.writes == 3,
+        "an unconfirmed restore is sent again");
+
+  fake_millis = 1000;
+  Bench never;
+  never.run(4000);
+  start_boost(never);
+  never.boost.stop();
+  never.tion.apply_writes = false;
+  never.run(30000);
+  CHECK(never.tion.state.fan_speed == 6 &&
+            never.tion.writes == 1 + BoostTimer::kRestoreAttempts,
+        "the restore is attempted a bounded number of times");
+  never.tion.apply_writes = true;
+  never.run(30000);
+  CHECK(never.tion.writes == 1 + BoostTimer::kRestoreAttempts, "and then left alone");
+
+  fake_millis = 1000;
+  Bench busy;
+  busy.run(4000);
+  start_boost(busy);
+  busy.boost.stop();
+  auto idle = busy.status();
+  CHECK(busy.access.submit(ControlCommand::sound(false)) != 0, "one command runs");
+  busy.run_uart_only(20);
+  CHECK(busy.access.submit(ControlCommand::power(true)) != 0, "another one waits");
+  CHECK(!busy.boost.tick(idle, fake_millis) && busy.tion.state.fan_speed == 6,
+        "a restore refused by a full mailbox waits");
+  busy.run(5000);
+  CHECK(busy.tion.state.fan_speed == 3, "and is sent when the mailbox frees");
+
+  fake_millis = 1000;
+  Bench native;
+  native.run(4000);
+  start_boost(native);
+  native.boost.stop();
+  CHECK(native.run_until_submitted(), "the restore is queued");
+  native.tion.state.fan_speed = 5;  // Changed on the remote before the pre-read.
+  native.run(10000);
+  CHECK(native.tion.state.fan_speed == 5 && native.tion.writes == 1,
+        "a restore that meets changed airflow is not repeated");
 }
 
 // A boost whose result is no longer tracked is not assumed to run.
@@ -333,8 +418,9 @@ int main() {
   test_boost_refusals_and_failure();
   test_boost_follows_its_own_ticket();
   test_boost_start_conditions();
-  test_boost_ends_when_the_mode_changes();
+  test_boost_ends_when_the_airflow_changes();
   test_boost_restore_rules();
+  test_boost_restore_retries();
   test_boost_with_lost_outcome();
   std::cout << "HomeKit mapping and boost timer: PASS\n";
 }

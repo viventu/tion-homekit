@@ -78,7 +78,10 @@ void upstream_heat_off() { delayed_poll(true, false); }
 void legacy_preserves_native() { delayed_poll(false, true); }
 void upstream_preserves_native() { delayed_poll(true, true); }
 
-void lost_read_stays_fail_closed() {
+// A reply that never arrives must not block control forever: after
+// UartCore::kLostStateReplyMs it is counted as lost, and the next command
+// reads its own baseline.
+void lost_read_recovers() {
   boot_platform();
   auto& device = fake::esp().tion;
   device.respond = false;
@@ -86,17 +89,25 @@ void lost_read_stays_fail_closed() {
   device.state.heater_allowed = true;
   write_tile("Нагрев притока", "Active", 0);
   run_platform(4500);
-  CHECK(tion_uart.status().control_failure == tion4s::ControlFailure::Expired &&
+  const auto failed = tion_uart.status();
+  CHECK((failed.control_failure == tion4s::ControlFailure::ReadTimeout ||
+         failed.control_failure == tion4s::ControlFailure::Expired) &&
             device.writes == 0,
-        "missing old reply expires the intent without writing from another response");
+        "without replies the intent fails without writing from another response");
   device.respond = true;
   run_platform(3500);
-  CHECK(tion_uart.status().device.fresh && tion_uart.status().state_reads_pending != 0,
-        "read-only telemetry recovers without pretending the lost reply was received");
+  CHECK(tion_uart.status().device.fresh && tion_uart.status().lost_state_replies >= 1,
+        "replies that never came are counted as lost");
   write_tile("Нагрев притока", "Active", 0);
   run_platform(4500);
-  CHECK(device.writes == 0,
-        "a new command cannot bypass uncertain response ordering");
+  CHECK(device.writes == 1 && !device.state.heater_allowed,
+        "the next command reads its own baseline and is written");
+  const auto queued = tion_uart.submit(tion4s::ControlCommand::sound(false), true,
+                                       tion_uart.status().control_failed);
+  CHECK(queued != 0 && tion_uart.cancel(queued) && !tion_uart.cancel(queued),
+        "a command not started yet is revoked through the adapter");
+  run_platform(1000);
+  CHECK(device.writes == 1 && device.state.sound_on, "the revoked command never writes");
   fake::esp().stop_task();
 }
 
@@ -127,7 +138,7 @@ const test_support::Scenario cases[] = {
   {"02D2 old poll before heater off", upstream_heat_off},
   {"02D0 preserves native fields", legacy_preserves_native},
   {"02D2 preserves native fields", upstream_preserves_native},
-  {"lost reply remains fail closed", lost_read_stays_fail_closed},
+  {"lost reply is expired and control recovers", lost_read_recovers},
   {"watchdog safe boot through sketch", safe_boot_after_watchdogs},
 };
 }  // namespace

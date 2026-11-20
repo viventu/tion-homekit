@@ -134,6 +134,8 @@ std::uint32_t Esp32UartService::submit(const ControlCommand& command,
   return core_.submit(command, allow_legacy_02d0, expected_failures, millis());
 }
 
+bool Esp32UartService::cancel(std::uint32_t ticket) { return core_.cancel(ticket); }
+
 }  // namespace tion4s
 
 #endif  // CONFIG_IDF_TARGET_ESP32S3 && !ARDUINO_USB_CDC_ON_BOOT

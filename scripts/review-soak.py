@@ -29,6 +29,11 @@ def optional_number(row: dict[str, str], field: str) -> int | None:
     return number(row, field) if value else None
 
 
+def optional_delta(previous: dict[str, str], current: dict[str, str], field: str) -> int:
+    before, after = optional_number(previous, field), optional_number(current, field)
+    return max(0, after - before) if before is not None and after is not None else 0
+
+
 def stall_limit_reached(row: dict[str, str]) -> bool:
     return "limit reached" in (row.get("uart_stall_restarts") or "")
 
@@ -91,6 +96,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         wifi_disconnects += max(0, number(current, "wifi_disconnects") -
                                 number(previous, "wifi_disconnects"))
         control_failures += max(0, failure_count(current) - failure_count(previous))
+        control_failures += optional_delta(previous, current, "context_failed")
 
     missed_intervals = sum(
         max(0, round((datetime.fromisoformat(current["timestamp_utc"]) -
@@ -104,6 +110,8 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
     raw_errors = max(number(row, "raw_errors") for row in reachable)
     rejected_frames = max(number(row, "rejected_frames") for row in reachable)
     uart_tx_failures = max(number(row, "uart_tx_failures") for row in reachable)
+    lost_state_replies = max(optional_number(row, "lost_state_replies") or 0
+                             for row in reachable)
     max_heartbeat_gap_ms = max(number(row, "max_heartbeat_tx_gap_ms")
                                for row in reachable)
     min_free_heap_bytes = min(number(row, "minimum_free_heap_bytes")
@@ -142,7 +150,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         problems.append("heartbeat TX age reached 5 seconds")
     if max_heartbeat_gap_ms >= 5000:
         problems.append("heartbeat TX gap reached 5 seconds")
-    if raw_errors or rejected_frames or uart_tx_failures:
+    if raw_errors or rejected_frames or uart_tx_failures or lost_state_replies:
         problems.append("Tion or UART errors observed")
     if control_failures:
         problems.append("control transaction failed")
@@ -175,6 +183,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         "raw_errors": raw_errors,
         "rejected_frames": rejected_frames,
         "uart_tx_failures": uart_tx_failures,
+        "lost_state_replies": lost_state_replies,
         "control_failures": control_failures,
         "minimum_free_heap_bytes": min_free_heap_bytes,
         "minimum_uart_stack_free_bytes": min_uart_stack_free_bytes,

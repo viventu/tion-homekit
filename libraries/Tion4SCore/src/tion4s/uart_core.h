@@ -68,8 +68,10 @@ struct UartStatus {
   std::uint32_t tx_failures = 0;
   std::uint32_t first_heartbeat_after_boot_ms = 0;
   // Replies owed by state reads. Commands cannot start another read until
-  // these are drained; a missing reply keeps writes closed, even after retry.
+  // these are drained. A reply that has not arrived within
+  // UartCore::kLostStateReplyMs is counted as lost and no longer owed.
   std::uint32_t state_reads_pending = 0;
+  std::uint32_t lost_state_replies = 0;
   // The last command that reached the transaction and where it stands.
   ControlCommand control_command{};
   ControlPhase control_phase = ControlPhase::Idle;
@@ -78,8 +80,13 @@ struct UartStatus {
   std::uint32_t control_request_id = 0;
   std::uint32_t control_applied = 0;
   std::uint32_t control_unchanged = 0;
-  // Terminal failures. Every one of them closes the HomeKit lease.
+  // Terminal failures of commands without a context. Context-bound commands
+  // belong to local automation such as boost, which follows its
+  // own tickets; their failures are not counted here.
   std::uint32_t control_failed = 0;
+  // Failures of context-bound commands, except a changed context: that
+  // command no longer applies, and the device and link are fine.
+  std::uint32_t context_failed = 0;
   // A command is running or waiting. It turns false only together with the
   // device state read after the command finished.
   bool control_pending = false;
@@ -89,8 +96,10 @@ struct UartStatus {
   CommandResult recent[kRecentResults]{};
 };
 
-// Where a submitted command stands in `status`. Unknown means the result is
-// no longer tracked; callers must treat it like a failure.
+// Where a submitted command stands in `status`: its own outcome, failure and
+// refusal, never those of another command. Pending while it runs or waits;
+// Unknown when it is no longer tracked, which callers treat like a failure.
+CommandResult result_of(const UartStatus& status, std::uint32_t ticket);
 CommandOutcome outcome_of(const UartStatus& status, std::uint32_t ticket);
 
 // What the HomeKit adapter needs from the UART owner.
@@ -100,9 +109,12 @@ class ControlChannel {
   // Returns a nonzero ticket when the command was accepted, 0 when refused.
   // `expected_failures` is UartStatus::control_failed from the status the
   // caller based its decision on. A failure the caller has not seen yet
-  // refuses the command, so a revoked lease can never queue another write.
+  // refuses the command: no write is queued from a decision that predates it.
   virtual std::uint32_t submit(const ControlCommand& command, bool allow_legacy_02d0,
                                std::uint32_t expected_failures) = 0;
+  // True means the revocation request was accepted, not that an in-flight
+  // UART write was stopped. The ticket's terminal outcome decides that.
+  virtual bool cancel(std::uint32_t ticket) = 0;
 
  protected:
   ~ControlChannel() = default;
@@ -115,11 +127,17 @@ class ControlChannel {
 // Mailbox: one command runs at a time and one more may wait. A newer command
 // of the same group merges into the waiting one (the latest slider position
 // wins); any other command is refused. Filter reset and context-bound
-// commands never wait behind another command. A terminal failure drops the
-// waiting command, because the HomeKit lease closes.
+// commands never wait behind another command. A counted failure drops the
+// waiting command: it was queued while the device still looked controllable.
+// A failed context-bound command is not counted and leaves the waiting
+// command in place: automation must never cost a person's command.
 class UartCore {
  public:
   static constexpr std::uint32_t kPartialFrameTimeoutMs = 250;
+  // The breezer answers a state read within tens of milliseconds. After this
+  // long the answer is lost (noise, CRC error or a failed TX) and a new read
+  // may start; otherwise one lost answer would block every later command.
+  static constexpr std::uint32_t kLostStateReplyMs = 2000;
   static constexpr unsigned kReceiveBudget = 128;
 
   explicit UartCore(StatusLock& lock) : lock_(lock) {}
@@ -133,6 +151,7 @@ class UartCore {
   void service(UartPort& port);
   std::uint32_t submit(const ControlCommand& command, bool allow_legacy_02d0,
                        std::uint32_t expected_failures, std::uint32_t now_ms);
+  bool cancel(std::uint32_t ticket);
   UartStatus status(const Clock& clock) const;
 
  private:
@@ -151,6 +170,9 @@ class UartCore {
   void transmit_requests(UartPort& port);
   bool take_waiting_command(Pending& next);
   void start_waiting_command(std::uint32_t now_ms);
+  void cancel_running_before_write();
+  void expire_lost_state_reads(std::uint32_t now_ms);
+  void count_state_read(std::uint32_t now_ms);
   void transmit_control(UartPort& port);
   void settle();
   bool command_waiting();
@@ -169,6 +191,8 @@ class UartCore {
   std::uint32_t tx_failures_ = 0;
   std::uint32_t first_heartbeat_ms_ = 0;
   std::uint32_t state_reads_pending_ = 0;
+  std::uint32_t last_state_read_ms_ = 0;
+  std::uint32_t lost_state_replies_ = 0;
   bool input_pending_ = false;
   bool command_running_ = false;
 
@@ -178,10 +202,12 @@ class UartCore {
   Pending waiting_{};
   bool has_waiting_ = false;
   std::uint32_t running_ticket_ = 0;
+  std::uint32_t cancel_requested_ticket_ = 0;
   std::uint32_t last_ticket_ = 0;
   std::uint32_t applied_ = 0;
   std::uint32_t unchanged_ = 0;
   std::uint32_t failures_ = 0;
+  std::uint32_t context_failures_ = 0;
   CommandResult recent_[UartStatus::kRecentResults]{};
 };
 

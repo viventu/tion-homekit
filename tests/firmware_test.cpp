@@ -229,15 +229,14 @@ void boot_publishes_the_accessory() {
 #if defined(TION_ENABLE_WEB_DIAGNOSTICS)
   CHECK(homeSpan.web_log_url == "tion-status" && homeSpan.web_log_callback != nullptr,
         "the diagnostics build serves /tion-status");
-  const std::string suffix = "-diag";
+  const std::string expected_version = "0.2.1-diag";
 #else
   CHECK(homeSpan.web_log_url.empty() && homeSpan.web_log_callback == nullptr,
         "the normal build has no web page");
-  const std::string suffix = "-gm1";
+  const std::string expected_version = "0.2.1";
 #endif
   const auto& version = homeSpan.sketch_version;
-  CHECK(version.rfind("0.2.0-", 0) == 0 &&
-            version.compare(version.size() - suffix.size(), suffix.size(), suffix) == 0,
+  CHECK(version == expected_version,
         "sketch version names the variant");
   CHECK(homeSpan.accessories.size() == 1 && layout() == kLayout,
         "services and characteristics keep their order and IIDs");

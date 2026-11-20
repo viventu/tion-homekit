@@ -20,6 +20,9 @@ constexpr std::uint16_t kFirmwareBlocked03CD = 0x03CD;
 constexpr std::uint8_t kMaxFanSteps = 6;
 constexpr std::int8_t kMinHeaterTargetC = 1;
 constexpr std::int8_t kMaxHeaterTargetC = 25;
+// Project acceptance range for measured temperatures, shared with HomeKit.
+constexpr std::int8_t kMinMeasuredTemperatureC = -50;
+constexpr std::int8_t kMaxMeasuredTemperatureC = 100;
 // Upstream's configurable target envelope: a reported target outside it is
 // never relayed in a full-state write.
 constexpr std::int8_t kMinTargetEnvelopeC = -25;
@@ -42,9 +45,18 @@ enum class ChangeGroup : std::uint8_t { None, Fan, Gate, Settings, Heater, Filte
 
 // Reported values a context-bound command requires, besides power on.
 struct CommandContext {
+  CommandContext() = default;
+  CommandContext(std::uint8_t speed, std::uint8_t gate, std::optional<bool> allowed,
+                 std::optional<std::int8_t> target = std::nullopt)
+      : fan_speed(speed), gate_position(gate), heater_allowed(allowed),
+        target_temperature(target) {}
   std::uint8_t fan_speed = 0;
   std::uint8_t gate_position = 0;
-  bool heater_allowed = false;
+  // Engaged fields must match the fresh pre-read, so a context-bound write
+  // never overwrites a native heater change. Airflow-only commands (boost)
+  // leave both empty.
+  std::optional<bool> heater_allowed;
+  std::optional<std::int8_t> target_temperature;
 };
 
 // A requested set of changes: every engaged field is one change, named like

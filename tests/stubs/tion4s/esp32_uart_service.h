@@ -80,6 +80,7 @@ class Esp32UartService final : public ControlChannel {
     ++submitted;
     return core.submit(command, allow_legacy_02d0, expected_failures, millis());
   }
+  bool cancel(std::uint32_t ticket) override { return core.cancel(ticket); }
 
   // Set before setup().
   bool uart_opens = true;

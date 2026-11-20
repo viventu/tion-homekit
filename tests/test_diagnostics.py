@@ -107,6 +107,19 @@ class SoakReviewTests(unittest.TestCase):
         self.assertEqual(report["control_failures"], 1)
         self.assertEqual(report["status"], "FAIL")
 
+    def test_lost_replies_and_automatic_failures(self):
+        rows = samples()
+        rows[-1]["lost_state_replies"] = "2"
+        report = self.review(rows)
+        self.assertEqual(report["lost_state_replies"], 2)
+        self.assertIn("Tion or UART errors observed", report["problems"])
+        rows = samples()
+        rows[1]["context_failed"] = "1"
+        rows[2]["context_failed"] = "1"
+        report = self.review(rows)
+        self.assertEqual(report["control_failures"], 1)
+        self.assertEqual(report["status"], "FAIL")
+
     def test_bad_timestamps_and_missing_metrics(self):
         for field, value in (("timestamp_utc", samples()[0]["timestamp_utc"]),
                              ("minimum_free_heap_bytes", "")):
@@ -126,7 +139,8 @@ class SoakReviewTests(unittest.TestCase):
 
     def test_csv_from_older_monitor_without_new_columns(self):
         new_fields = {"uart_stack_free_bytes", "uart_stall_restarts", "control_unchanged",
-                      "pending_state_replies", "control_available", "firmware_version"}
+                      "pending_state_replies", "control_available", "firmware_version",
+                      "lost_state_replies", "context_failed"}
         fields = [field for field in monitor.FIELDS if field not in new_fields]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "legacy.csv"
@@ -157,6 +171,8 @@ class SoakReviewTests(unittest.TestCase):
                         b"<tr><td>Firmware version:</td><td>0.2.0-gm1-diag</td></tr>"
                         b"<tr><td>Control available:</td><td>1</td></tr>"
                         b"<tr><td>Pending state replies:</td><td>2</td></tr>"
+                        b"<tr><td>Lost state replies:</td><td>1</td></tr>"
+                        b"<tr><td>Context-bound failures:</td><td>3</td></tr>"
                         b"<tr><td>Private network:</td><td>do-not-record</td></tr>")
 
         with patch.object(monitor, "urlopen", return_value=Response()):
@@ -166,6 +182,8 @@ class SoakReviewTests(unittest.TestCase):
         self.assertEqual(row["firmware_version"], "0.2.0-gm1-diag")
         self.assertEqual(row["control_available"], "1")
         self.assertEqual(row["pending_state_replies"], "2")
+        self.assertEqual(row["lost_state_replies"], "1")
+        self.assertEqual(row["context_failed"], "3")
         self.assertNotIn("do-not-record", row.values())
 
     def test_failed_request_records_only_exception_type(self):
