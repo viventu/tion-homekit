@@ -42,9 +42,18 @@ enum class ChangeGroup : std::uint8_t { None, Fan, Gate, Settings, Heater, Filte
 
 // Reported values a context-bound command requires, besides power on.
 struct CommandContext {
+  CommandContext() = default;
+  CommandContext(std::uint8_t speed, std::uint8_t gate, std::optional<bool> allowed,
+                 std::optional<std::int8_t> target = std::nullopt)
+      : fan_speed(speed), gate_position(gate), heater_allowed(allowed),
+        target_temperature(target) {}
   std::uint8_t fan_speed = 0;
   std::uint8_t gate_position = 0;
-  bool heater_allowed = false;
+  // Engaged fields must match the fresh pre-read, so a context-bound write
+  // never overwrites a native heater change. Airflow-only commands (boost)
+  // leave both empty.
+  std::optional<bool> heater_allowed;
+  std::optional<std::int8_t> target_temperature;
 };
 
 // A requested set of changes: every engaged field is one change, named like

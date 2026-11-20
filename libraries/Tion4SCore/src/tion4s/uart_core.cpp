@@ -25,19 +25,26 @@ std::uint32_t saturating_add(std::uint32_t value, std::uint32_t addend) {
 
 }  // namespace
 
-CommandOutcome outcome_of(const UartStatus& status, std::uint32_t ticket) {
+CommandResult result_of(const UartStatus& status, std::uint32_t ticket) {
+  CommandResult result;
+  result.ticket = ticket;
   if (ticket == 0) {
-    return CommandOutcome::Unknown;
+    return result;
   }
   if (ticket == status.running_ticket || ticket == status.waiting_ticket) {
-    return CommandOutcome::Pending;
+    result.outcome = CommandOutcome::Pending;
+    return result;
   }
-  for (const auto& result : status.recent) {
-    if (result.ticket == ticket) {
-      return result.outcome;
+  for (const auto& recent : status.recent) {
+    if (recent.ticket == ticket) {
+      return recent;
     }
   }
-  return CommandOutcome::Unknown;
+  return result;
+}
+
+CommandOutcome outcome_of(const UartStatus& status, std::uint32_t ticket) {
+  return result_of(status, ticket).outcome;
 }
 
 bool UartCore::can_wait(const ControlCommand& command) {
@@ -90,6 +97,27 @@ std::uint32_t UartCore::submit(const ControlCommand& command, bool allow_legacy_
   return waiting_.ticket;
 }
 
+bool UartCore::cancel(std::uint32_t ticket) {
+  if (ticket == 0) return false;
+  const Guard guard(lock_);
+  if (has_waiting_ && waiting_.ticket == ticket) {
+    has_waiting_ = false;
+    record({ticket, CommandOutcome::Dropped, ControlFailure::None, WriteRejection::None});
+    // The ticket's own result may show at once. control_pending is left to
+    // publish(): a command that finished in this pass may not be published.
+    status_.waiting_ticket = 0;
+    for (std::size_t i = 0; i < UartStatus::kRecentResults; ++i) {
+      status_.recent[i] = recent_[i];
+    }
+    return true;
+  }
+  if (running_ticket_ == ticket) {
+    cancel_requested_ticket_ = ticket;
+    return true;
+  }
+  return false;
+}
+
 UartStatus UartCore::status(const Clock& clock) const {
   UartStatus result;
   std::uint32_t published_ms = 0;
@@ -120,12 +148,25 @@ void UartCore::service(UartPort& port) {
   flush_idle_input(port.now_ms());
   receive(port);
   expire_lost_state_reads(port.now_ms());
+  cancel_running_before_write();
   settle();
   transmit_requests(port);
   start_waiting_command(port.now_ms());
+  cancel_running_before_write();
+  settle();
   transmit_control(port);
   settle();
   publish(port.now_ms());
+}
+
+void UartCore::cancel_running_before_write() {
+  std::uint32_t requested = 0;
+  {
+    const Guard guard(lock_);
+    requested = cancel_requested_ticket_ == running_ticket_ ? cancel_requested_ticket_ : 0;
+    cancel_requested_ticket_ = 0;
+  }
+  if (requested != 0) control_.cancel_before_write();
 }
 
 void UartCore::expire_lost_state_reads(std::uint32_t now_ms) {
@@ -283,13 +324,24 @@ void UartCore::settle() {
   } else if (control_.phase() == ControlPhase::Unchanged) {
     result.outcome = CommandOutcome::Unchanged;
     ++unchanged_;
+  } else if (control_.phase() == ControlPhase::Cancelled) {
+    result.outcome = CommandOutcome::Dropped;
   } else {
     result.outcome = CommandOutcome::Failed;
+  }
+  // Automation follows its own ticket. Its failure neither refuses stale
+  // callers nor drops the person's command waiting behind it.
+  const bool failed = result.outcome == CommandOutcome::Failed;
+  const bool context_bound = control_.command().context.has_value();
+  const bool counted = failed && !context_bound;
+  if (counted) {
     ++failures_;
+  } else if (failed && result.failure != ControlFailure::ContextChanged) {
+    ++context_failures_;
   }
   record(result);
-  if (result.outcome == CommandOutcome::Failed && has_waiting_) {
-    // The HomeKit lease closes on any failure; nothing queued may follow it.
+  if (counted && has_waiting_) {
+    // Queued while the device still looked controllable.
     record({waiting_.ticket, CommandOutcome::Dropped, ControlFailure::None,
             WriteRejection::None});
     has_waiting_ = false;
@@ -315,6 +367,7 @@ void UartCore::publish(std::uint32_t now_ms) {
   status_.control_applied = applied_;
   status_.control_unchanged = unchanged_;
   status_.control_failed = failures_;
+  status_.context_failed = context_failures_;
   status_.control_pending = running_ticket_ != 0 || has_waiting_;
   status_.running_ticket = running_ticket_;
   status_.waiting_ticket = has_waiting_ ? waiting_.ticket : 0;

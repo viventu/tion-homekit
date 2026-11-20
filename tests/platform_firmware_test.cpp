@@ -102,6 +102,12 @@ void lost_read_recovers() {
   run_platform(4500);
   CHECK(device.writes == 1 && !device.state.heater_allowed,
         "the next command reads its own baseline and is written");
+  const auto queued = tion_uart.submit(tion4s::ControlCommand::sound(false), true,
+                                       tion_uart.status().control_failed);
+  CHECK(queued != 0 && tion_uart.cancel(queued) && !tion_uart.cancel(queued),
+        "a command not started yet is revoked through the adapter");
+  run_platform(1000);
+  CHECK(device.writes == 1 && device.state.sound_on, "the revoked command never writes");
   fake::esp().stop_task();
 }
 

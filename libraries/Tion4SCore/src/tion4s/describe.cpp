@@ -20,6 +20,8 @@ const char* describe(ControlPhase phase) {
       return "unchanged, no write";
     case ControlPhase::Failed:
       return "failed";
+    case ControlPhase::Cancelled:
+      return "cancelled before write";
   }
   return "unknown";
 }

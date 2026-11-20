@@ -168,6 +168,7 @@ class ScriptedChannel final : public tion4s::ControlChannel {
     ++submitted;
     return 1;
   }
+  bool cancel(std::uint32_t) override { return false; }
 
   tion4s::UartStatus next{};
   unsigned submitted = 0;

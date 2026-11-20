@@ -2,10 +2,12 @@
 
 #include "support/check.h"
 #include "support/fake_tion.h"
+#include "tion4s/describe.h"
 #include "tion4s/stall_guard.h"
 #include "tion4s/uart_core.h"
 
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -391,8 +393,42 @@ void test_unsolicited_state_does_not_underflow_read_count() {
         "early write ACK neither consumes nor creates a read response");
 }
 
-}  // namespace
+void test_cancel_before_write_and_native_target_context() {
+  Bench bench;
+  bench.run(4000);
+  const auto waiting = bench.submit(ControlCommand::heater(true));
+  CHECK(bench.core.cancel(waiting) && bench.outcome(waiting) == CommandOutcome::Dropped,
+        "a waiting heater command is removed synchronously");
+  bench.run(1000);
+  CHECK(bench.tion.writes == 0 && bench.status().control_failed == 0 &&
+            !bench.core.cancel(waiting) && !bench.core.cancel(0),
+        "cancelled waiting command never writes or counts as a failure");
 
+  const auto reading = bench.submit(ControlCommand::heater(true));
+  bench.core.service(bench.tion);
+  CHECK(bench.core.cancel(reading), "a pre-read command accepts cancellation");
+  bench.run(1000);
+  CHECK(bench.outcome(reading) == CommandOutcome::Dropped && bench.tion.writes == 0 &&
+            bench.status().control_phase == ControlPhase::Cancelled &&
+            bench.status().control_failed == 0,
+        "pre-read cancellation ends without any state write");
+  CHECK(std::string(tion4s::describe(ControlPhase::Cancelled)) == "cancelled before write",
+        "cancelled commands have an explicit diagnostic state");
+
+  auto conditional = ControlCommand::heater_and_target(true, 22);
+  conditional.context = tion4s::CommandContext{3, 0, false, 20};
+  const auto native = bench.submit(conditional);
+  bench.tion.state.target_temperature = 19;
+  bench.settle_until_idle();
+  CHECK(bench.outcome(native) == CommandOutcome::Failed &&
+            bench.status().control_failure == ControlFailure::ContextChanged &&
+            bench.tion.state.target_temperature == 19 && bench.tion.writes == 0,
+        "pre-read refuses to overwrite a native target change");
+}
+
+
+// A state reply that never comes is written off after a quiet interval, so
+// the next command reads its own baseline instead of timing out behind it.
 void test_lost_state_reply_expires() {
   Bench bench;
   bench.run(4000);
@@ -410,6 +446,59 @@ void test_lost_state_reply_expires() {
         "the lost reply is counted and the command is applied");
 }
 
+// A context-bound command that finds the breezer changed is not a device
+// failure: the next caller need not acknowledge it, and a waiting command
+// stays queued.
+void test_context_change_is_not_a_counted_failure() {
+  Bench bench;
+  bench.run(4000);
+  const auto seen = bench.status().control_failed;
+  auto conditional = ControlCommand::heater_and_target(true, 22);
+  conditional.context = tion4s::CommandContext{3, 0, false, 20};
+  const auto automatic = bench.submit(conditional);
+  CHECK(automatic != 0, "a context-bound command is accepted when idle");
+  bench.tion.state.fan_speed = 4;  // Changed on the breezer before the pre-read.
+  bench.core.service(bench.tion);
+  const auto waiting = bench.submit(ControlCommand::sound(false));
+  CHECK(waiting != 0, "a person's command waits behind it");
+  bench.settle_until_idle();
+  const auto status = bench.status();
+  CHECK(tion4s::result_of(status, automatic).failure == ControlFailure::ContextChanged &&
+            status.control_failed == seen && bench.outcome(waiting) == CommandOutcome::Applied &&
+            !bench.tion.state.sound_on && !bench.tion.state.heater_allowed &&
+            bench.tion.writes == 1,
+        "the stale command is skipped uncounted and the waiting one is applied");
+  const auto unknown = tion4s::result_of(status, 0xFFFF'FFF0u);
+  CHECK(tion4s::result_of(status, 0).outcome == CommandOutcome::Unknown &&
+            unknown.outcome == CommandOutcome::Unknown && unknown.ticket == 0xFFFF'FFF0u,
+        "no ticket and a forgotten ticket have no result");
+}
+
+// Cancelling a command whose write has left only requests it: the write is
+// confirmed as usual, and a command waiting behind it is kept.
+void test_cancel_after_write_is_too_late() {
+  Bench bench;
+  bench.run(4000);
+  const auto running = bench.submit(ControlCommand::speed_step(4));
+  for (unsigned pass = 0; pass < 300 && bench.tion.writes == 0; ++pass) {
+    bench.run(10);
+  }
+  const auto waiting = bench.submit(ControlCommand::sound(false));
+  CHECK(bench.tion.writes == 1 && waiting != 0 && bench.status().running_ticket == running,
+        "the first write has left and another command waits");
+  CHECK(tion4s::result_of(bench.status(), running).outcome == CommandOutcome::Pending &&
+            tion4s::result_of(bench.status(), waiting).outcome == CommandOutcome::Pending,
+        "both tickets are pending");
+  CHECK(bench.core.cancel(running), "cancelling the running command is only a request");
+  bench.settle_until_idle();
+  CHECK(bench.outcome(running) == CommandOutcome::Applied &&
+            bench.outcome(waiting) == CommandOutcome::Applied &&
+            bench.tion.state.fan_speed == 4 && !bench.tion.state.sound_on,
+        "a written command is confirmed and the waiting one still runs");
+}
+
+// Verification may overlap its own earlier reads: an answer lost after the
+// write does not stop the next verification read.
 void test_lost_verification_reply() {
   Bench bench;
   bench.run(4000);
@@ -430,6 +519,31 @@ void test_lost_verification_reply() {
         "the first verification answer is lost and the next one confirms the write");
 }
 
+// Automation follows its own ticket: its failure after a write is counted
+// apart and does not cost the person's waiting command.
+void test_failed_context_bound_write_keeps_waiting_command() {
+  Bench bench;
+  bench.run(4000);
+  auto conditional = ControlCommand::heater_and_target(true, 22);
+  conditional.context = tion4s::CommandContext{3, 0, false, 20};
+  bench.tion.apply_writes = false;
+  const auto automatic = bench.submit(conditional);
+  for (unsigned pass = 0; pass < 300 && bench.tion.writes == 0; ++pass) {
+    bench.run(10);
+  }
+  bench.tion.apply_writes = true;
+  const auto waiting = bench.submit(ControlCommand::sound(false));
+  CHECK(waiting != 0, "a person's command waits behind the automatic write");
+  bench.settle_until_idle();
+  const auto status = bench.status();
+  CHECK(bench.outcome(automatic) == CommandOutcome::Failed && status.control_failed == 0 &&
+            status.context_failed == 1 && bench.outcome(waiting) == CommandOutcome::Applied &&
+            !bench.tion.state.sound_on,
+        "the automatic failure is reported apart and the waiting command runs");
+}
+
+}  // namespace
+
 int main() {
   test_idle_status_is_never_older_than_the_command();
   test_boot_and_heartbeat_priority();
@@ -449,7 +563,11 @@ int main() {
   test_stall_guard_limits();
   test_status_samples_clock_under_lock();
   test_unsolicited_state_does_not_underflow_read_count();
+  test_cancel_before_write_and_native_target_context();
   test_lost_state_reply_expires();
+  test_context_change_is_not_a_counted_failure();
+  test_cancel_after_write_is_too_late();
   test_lost_verification_reply();
+  test_failed_context_bound_write_keeps_waiting_command();
   std::cout << "UART core scheduling and recovery: PASS\n";
 }

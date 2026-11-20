@@ -19,6 +19,7 @@ enum class ControlPhase : std::uint8_t {
   Applied,
   Unchanged,
   Failed,
+  Cancelled,
 };
 
 enum class ControlStep : std::uint8_t { None, Read, Write, Verify };
@@ -35,6 +36,16 @@ enum class ControlFailure : std::uint8_t {
   Transport,          // UART transmission failed.
   Expired,            // The intent aged out before its write was sent.
 };
+
+// The write never left: the breezer still has the state its pre-read, or
+// the snapshot the command was admitted from, showed. A transport failure
+// may have happened during the write and does not count.
+constexpr bool failed_before_write(ControlFailure failure) {
+  return failure == ControlFailure::UnsupportedDevice ||
+         failure == ControlFailure::StaleState || failure == ControlFailure::ContextChanged ||
+         failure == ControlFailure::Refused || failure == ControlFailure::ReadTimeout ||
+         failure == ControlFailure::Expired;
+}
 
 struct ControlOutput {
   ControlStep step = ControlStep::None;
@@ -70,6 +81,7 @@ class ControlTransaction {
   void sent(ControlStep step, std::uint32_t now_ms);
   void observe(const Frame& frame, std::uint32_t now_ms);
   void transport_failed();
+  bool cancel_before_write();
 
   bool busy() const;
   ControlPhase phase() const { return phase_; }

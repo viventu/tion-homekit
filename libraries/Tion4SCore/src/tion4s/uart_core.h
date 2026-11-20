@@ -80,8 +80,13 @@ struct UartStatus {
   std::uint32_t control_request_id = 0;
   std::uint32_t control_applied = 0;
   std::uint32_t control_unchanged = 0;
-  // Terminal failures. Every one of them closes the HomeKit lease.
+  // Terminal failures of commands without a context. Context-bound commands
+  // belong to local automation such as boost, which follows its
+  // own tickets; their failures are not counted here.
   std::uint32_t control_failed = 0;
+  // Failures of context-bound commands, except a changed context: that
+  // command no longer applies, and the device and link are fine.
+  std::uint32_t context_failed = 0;
   // A command is running or waiting. It turns false only together with the
   // device state read after the command finished.
   bool control_pending = false;
@@ -91,8 +96,10 @@ struct UartStatus {
   CommandResult recent[kRecentResults]{};
 };
 
-// Where a submitted command stands in `status`. Unknown means the result is
-// no longer tracked; callers must treat it like a failure.
+// Where a submitted command stands in `status`: its own outcome, failure and
+// refusal, never those of another command. Pending while it runs or waits;
+// Unknown when it is no longer tracked, which callers treat like a failure.
+CommandResult result_of(const UartStatus& status, std::uint32_t ticket);
 CommandOutcome outcome_of(const UartStatus& status, std::uint32_t ticket);
 
 // What the HomeKit adapter needs from the UART owner.
@@ -102,9 +109,12 @@ class ControlChannel {
   // Returns a nonzero ticket when the command was accepted, 0 when refused.
   // `expected_failures` is UartStatus::control_failed from the status the
   // caller based its decision on. A failure the caller has not seen yet
-  // refuses the command, so a revoked lease can never queue another write.
+  // refuses the command: no write is queued from a decision that predates it.
   virtual std::uint32_t submit(const ControlCommand& command, bool allow_legacy_02d0,
                                std::uint32_t expected_failures) = 0;
+  // True means the revocation request was accepted, not that an in-flight
+  // UART write was stopped. The ticket's terminal outcome decides that.
+  virtual bool cancel(std::uint32_t ticket) = 0;
 
  protected:
   ~ControlChannel() = default;
@@ -117,8 +127,10 @@ class ControlChannel {
 // Mailbox: one command runs at a time and one more may wait. A newer command
 // of the same group merges into the waiting one (the latest slider position
 // wins); any other command is refused. Filter reset and context-bound
-// commands never wait behind another command. A terminal failure drops the
-// waiting command, because the HomeKit lease closes.
+// commands never wait behind another command. A counted failure drops the
+// waiting command: it was queued while the device still looked controllable.
+// A failed context-bound command is not counted and leaves the waiting
+// command in place: automation must never cost a person's command.
 class UartCore {
  public:
   static constexpr std::uint32_t kPartialFrameTimeoutMs = 250;
@@ -139,6 +151,7 @@ class UartCore {
   void service(UartPort& port);
   std::uint32_t submit(const ControlCommand& command, bool allow_legacy_02d0,
                        std::uint32_t expected_failures, std::uint32_t now_ms);
+  bool cancel(std::uint32_t ticket);
   UartStatus status(const Clock& clock) const;
 
  private:
@@ -157,6 +170,7 @@ class UartCore {
   void transmit_requests(UartPort& port);
   bool take_waiting_command(Pending& next);
   void start_waiting_command(std::uint32_t now_ms);
+  void cancel_running_before_write();
   void expire_lost_state_reads(std::uint32_t now_ms);
   void count_state_read(std::uint32_t now_ms);
   void transmit_control(UartPort& port);
@@ -188,10 +202,12 @@ class UartCore {
   Pending waiting_{};
   bool has_waiting_ = false;
   std::uint32_t running_ticket_ = 0;
+  std::uint32_t cancel_requested_ticket_ = 0;
   std::uint32_t last_ticket_ = 0;
   std::uint32_t applied_ = 0;
   std::uint32_t unchanged_ = 0;
   std::uint32_t failures_ = 0;
+  std::uint32_t context_failures_ = 0;
   CommandResult recent_[UartStatus::kRecentResults]{};
 };
 

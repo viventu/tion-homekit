@@ -119,6 +119,8 @@ void append_uart_diagnostics(String& html) {
              static_cast<unsigned long>(status.control_failed));
   append_row(html, "Control unchanged", "%lu",
              static_cast<unsigned long>(status.control_unchanged));
+  append_row(html, "Context-bound failures", "%lu",
+             static_cast<unsigned long>(status.context_failed));
 
   if (device.has_device_info) {
     const auto& info = device.device_info;

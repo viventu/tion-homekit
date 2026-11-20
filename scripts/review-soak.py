@@ -29,6 +29,11 @@ def optional_number(row: dict[str, str], field: str) -> int | None:
     return number(row, field) if value else None
 
 
+def optional_delta(previous: dict[str, str], current: dict[str, str], field: str) -> int:
+    before, after = optional_number(previous, field), optional_number(current, field)
+    return max(0, after - before) if before is not None and after is not None else 0
+
+
 def stall_limit_reached(row: dict[str, str]) -> bool:
     return "limit reached" in (row.get("uart_stall_restarts") or "")
 
@@ -91,6 +96,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         wifi_disconnects += max(0, number(current, "wifi_disconnects") -
                                 number(previous, "wifi_disconnects"))
         control_failures += max(0, failure_count(current) - failure_count(previous))
+        control_failures += optional_delta(previous, current, "context_failed")
 
     missed_intervals = sum(
         max(0, round((datetime.fromisoformat(current["timestamp_utc"]) -
