@@ -77,7 +77,6 @@ inline std::optional<tion4s::ControlCommand> heater_command(bool active_updated,
   return tion4s::ControlCommand::target(rounded);
 }
 
-// A plain on/off switch: the command that sets it and the reported value.
 struct Auxiliary {
   tion4s::ControlCommand (*command)(bool on);
   bool (*reported)(const tion4s::State& state);
@@ -93,12 +92,16 @@ inline constexpr Auxiliary kLed{tion4s::ControlCommand::led,
                                 [](const tion4s::State& state) { return state.led_on; }};
 
 // UART does not expose native turbo. This is a five-minute local max-speed
-// timer; restoration happens only if the breezer still has the exact mode
-// that the timer produced, and it is attempted once.
+// timer. Only an airflow change made elsewhere (power, speed or gate) ends it
+// without a restore. Heat changes, other commands' failures and stale
+// telemetry do not: the timer waits for a fresh state, and the restore is a
+// context-bound write that the pre-read refuses if the airflow changed.
 class BoostTimer {
  public:
   static constexpr std::uint32_t kDurationMs = 5 * 60 * 1000;
-  static constexpr std::uint32_t kRestoreWindowMs = 10 * 1000;
+  // A restore that failed for another reason than changed airflow is tried
+  // again on the next opportunity, up to this many attempts in all.
+  static constexpr std::uint8_t kRestoreAttempts = 3;
 
   explicit BoostTimer(ControlAccess& access) : access_(access) {}
 
@@ -114,35 +117,30 @@ class BoostTimer {
         snapshot.state.fan_speed >= snapshot.state.max_fan_speed) {
       return false;
     }
-    original_.fan_speed = snapshot.state.fan_speed;
-    original_.gate_position = snapshot.state.gate_position;
-    original_.heater_allowed = snapshot.state.heater_allowed;
+    original_ = tion4s::CommandContext(snapshot.state.fan_speed,
+                                       snapshot.state.gate_position, std::nullopt);
     maximum_speed_ = snapshot.state.max_fan_speed;
     ticket_ = access_.submit(
         tion4s::ControlCommand::speed_in_context(maximum_speed_, original_));
     if (ticket_ == 0) {
       return false;
     }
-    failures_at_start_ = status.control_failed;
     phase_ = Phase::Starting;
     deadline_ms_ = now_ms + kDurationMs;
+    restore_attempts_ = 0;
     return true;
   }
 
   // HomeKit turned the switch off.
-  void stop(std::uint32_t now_ms) {
-    if (phase_ != Phase::Idle) {
+  void stop() {
+    if (phase_ == Phase::Starting || phase_ == Phase::Running) {
       phase_ = Phase::RestorePending;
-      restore_requested_ms_ = now_ms;
     }
   }
 
   // Call on every loop pass. Returns whether the switch should read On.
   bool tick(const tion4s::UartStatus& status, std::uint32_t now_ms) {
-    // Any failed command cancels this timer, including its automatic restore.
-    if (phase_ != Phase::Idle && status.control_failed != failures_at_start_) {
-      phase_ = Phase::Idle;
-    }
+    const auto& snapshot = status.device;
     if (phase_ == Phase::Starting) {
       const auto outcome = tion4s::outcome_of(status, ticket_);
       if (outcome == tion4s::CommandOutcome::Applied) {
@@ -151,44 +149,58 @@ class BoostTimer {
         phase_ = Phase::Idle;
       }
     }
-    if (phase_ == Phase::Running) {
-      if (!boosted(status.device)) {
-        phase_ = Phase::Idle;  // Native control changed the mode.
+    // Without fresh telemetry nothing is decided; the timer keeps running.
+    if (phase_ == Phase::Running && snapshot.fresh) {
+      if (!boosted(snapshot)) {
+        phase_ = Phase::Idle;  // The airflow was changed elsewhere.
       } else if (static_cast<std::int32_t>(now_ms - deadline_ms_) >= 0) {
         phase_ = Phase::RestorePending;
-        restore_requested_ms_ = now_ms;
       }
     }
-    if (phase_ == Phase::RestorePending && !status.control_pending) {
-      if (now_ms - restore_requested_ms_ <= kRestoreWindowMs && boosted(status.device)) {
+    if (phase_ == Phase::Restoring) {
+      const auto result = tion4s::result_of(status, ticket_);
+      if (result.outcome == tion4s::CommandOutcome::Pending) {
+        return false;
+      }
+      // The restore's context needs the maximum step, so it never ends
+      // Unchanged; a changed context means the airflow was changed.
+      const bool done = result.outcome == tion4s::CommandOutcome::Applied ||
+                        result.failure == tion4s::ControlFailure::ContextChanged;
+      phase_ = done || restore_attempts_ >= kRestoreAttempts ? Phase::Idle
+                                                             : Phase::RestorePending;
+    }
+    if (phase_ == Phase::RestorePending && snapshot.fresh && !status.control_pending) {
+      if (!boosted(snapshot)) {
+        phase_ = Phase::Idle;  // The airflow was changed elsewhere.
+      } else {
         tion4s::CommandContext boosted_context = original_;
         boosted_context.fan_speed = maximum_speed_;
-        access_.submit(tion4s::ControlCommand::speed_in_context(original_.fan_speed,
-                                                                boosted_context));
+        ticket_ = access_.submit(tion4s::ControlCommand::speed_in_context(
+            original_.fan_speed, boosted_context));
+        if (ticket_ != 0) {
+          ++restore_attempts_;
+          phase_ = Phase::Restoring;
+        }
       }
-      phase_ = Phase::Idle;
     }
     return phase_ == Phase::Starting || phase_ == Phase::Running;
   }
 
  private:
-  enum class Phase : std::uint8_t { Idle, Starting, Running, RestorePending };
+  enum class Phase : std::uint8_t { Idle, Starting, Running, RestorePending, Restoring };
 
   bool boosted(const tion4s::Snapshot& snapshot) const {
-    return snapshot.fresh && snapshot.state.power_on &&
-           snapshot.state.gate_position == original_.gate_position &&
-           snapshot.state.heater_allowed == original_.heater_allowed &&
+    return snapshot.state.power_on && snapshot.state.gate_position == original_.gate_position &&
            snapshot.state.fan_speed == maximum_speed_;
   }
 
   ControlAccess& access_;
   Phase phase_ = Phase::Idle;
-  tion4s::CommandContext original_{};
+  tion4s::CommandContext original_;
   std::uint8_t maximum_speed_ = 0;
+  std::uint8_t restore_attempts_ = 0;
   std::uint32_t ticket_ = 0;
-  std::uint32_t failures_at_start_ = 0;
   std::uint32_t deadline_ms_ = 0;
-  std::uint32_t restore_requested_ms_ = 0;
 };
 
 }  // namespace tion_homekit
