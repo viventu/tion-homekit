@@ -100,8 +100,11 @@ class BoostTimer {
  public:
   static constexpr std::uint32_t kDurationMs = 5 * 60 * 1000;
   // A restore that failed for another reason than changed airflow is tried
-  // again on the next opportunity, up to this many attempts in all.
+  // again, up to this many attempts in all. The pause between attempts gives
+  // the cause time to pass: a refusal ends within one read, and back-to-back
+  // attempts would all meet the same condition.
   static constexpr std::uint8_t kRestoreAttempts = 3;
+  static constexpr std::uint32_t kRestoreRetryMs = 5000;
 
   explicit BoostTimer(ControlAccess& access) : access_(access) {}
 
@@ -168,8 +171,12 @@ class BoostTimer {
                         result.failure == tion4s::ControlFailure::ContextChanged;
       phase_ = done || restore_attempts_ >= kRestoreAttempts ? Phase::Idle
                                                              : Phase::RestorePending;
+      restore_failed_ms_ = now_ms;
     }
-    if (phase_ == Phase::RestorePending && snapshot.fresh && !status.control_pending) {
+    const bool retry_due =
+        restore_attempts_ == 0 || now_ms - restore_failed_ms_ >= kRestoreRetryMs;
+    if (phase_ == Phase::RestorePending && retry_due && snapshot.fresh &&
+        !status.control_pending) {
       if (!boosted(snapshot)) {
         phase_ = Phase::Idle;  // The airflow was changed elsewhere.
       } else {
@@ -201,6 +208,7 @@ class BoostTimer {
   std::uint8_t restore_attempts_ = 0;
   std::uint32_t ticket_ = 0;
   std::uint32_t deadline_ms_ = 0;
+  std::uint32_t restore_failed_ms_ = 0;
 };
 
 }  // namespace tion_homekit

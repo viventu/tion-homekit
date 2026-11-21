@@ -368,6 +368,23 @@ void test_boost_restore_retries() {
   never.run(30000);
   CHECK(never.tion.writes == 1 + BoostTimer::kRestoreAttempts, "and then left alone");
 
+  // A refusal ends within one read. The attempts are spaced, so a condition
+  // that passes in between does not use them all up.
+  fake_millis = 1000;
+  Bench refused;
+  refused.run(4000);
+  start_boost(refused);
+  refused.tion.state.errors = 1;
+  refused.run(3000);
+  refused.boost.stop();
+  refused.run(BoostTimer::kRestoreRetryMs - 1000);
+  CHECK(refused.status().control_refused == 1 && refused.tion.state.fan_speed == 6,
+        "a refused restore is not repeated at once");
+  refused.tion.state.errors = 0;
+  refused.run(3000);
+  CHECK(refused.status().control_refused == 1 && refused.tion.state.fan_speed == 3,
+        "the next attempt follows after a pause and restores the speed");
+
   fake_millis = 1000;
   Bench busy;
   busy.run(4000);
