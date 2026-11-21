@@ -231,6 +231,7 @@ void test_safe_direction_with_device_errors() {
   CHECK(bench.status().control_failure == ControlFailure::Refused &&
             bench.status().control_refusal == WriteRejection::DeviceErrors &&
             bench.status().control_refused == 1 && bench.status().control_failed == 0 &&
+            bench.status().device_refused == 1 &&
             bench.status().context_failed == 0 && bench.tion.writes == 0,
         "reported device errors block a speed change and say why, without counting a failure");
   const auto failed = bench.status().control_failed;
@@ -239,6 +240,28 @@ void test_safe_direction_with_device_errors() {
   bench.settle_until_idle();
   CHECK(!bench.tion.state.power_on && bench.status().control_failed == failed,
         "reported device errors do not block power-off");
+}
+
+// A refusal that a rule of the project explains says nothing about the
+// breezer. One caused by the reported state does, and is counted on its own.
+void test_refusals_caused_by_the_reported_state() {
+  Bench bench;
+  bench.tion.state.heater_allowed = true;
+  bench.run(4000);
+  CHECK(bench.submit(ControlCommand::recirculation(true)), "recirculation accepted");
+  bench.settle_until_idle();
+  CHECK(bench.status().control_refusal == WriteRejection::UnsafeCombination &&
+            bench.status().control_refused == 1 && bench.status().device_refused == 0,
+        "a safety rule is not a refusal caused by the reported state");
+  bench.tion.state.heater_allowed = false;
+  bench.tion.state.target_temperature = 99;
+  bench.run(3000);
+  CHECK(bench.submit(ControlCommand::speed_step(5)), "speed command accepted");
+  bench.settle_until_idle();
+  CHECK(bench.status().control_refusal == WriteRejection::InvalidBaseline &&
+            bench.status().control_refused == 2 && bench.status().device_refused == 1 &&
+            bench.status().control_failed == 0 && bench.tion.writes == 0,
+        "a state that cannot be relayed is");
 }
 
 // A refusal is the project's own decision before any write. It must not look
@@ -610,6 +633,7 @@ int main() {
   test_unchanged_is_not_failure();
   test_expired_before_write();
   test_safe_direction_with_device_errors();
+  test_refusals_caused_by_the_reported_state();
   test_refusal_keeps_the_waiting_command();
   test_idle_flush_recovers_frame_behind_stale_header();
   test_tx_failure_triggers_bounded_restart();
