@@ -147,6 +147,8 @@ void UartCore::service(UartPort& port) {
   session_.tick(port.now_ms());
   flush_idle_input(port.now_ms());
   receive(port);
+  // Before transmit_requests(): the next poll is due as soon as a reply
+  // counts as lost, and sending it first would restart that wait.
   expire_lost_state_reads(port.now_ms());
   cancel_running_before_write();
   settle();
