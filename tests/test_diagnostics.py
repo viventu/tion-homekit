@@ -57,12 +57,12 @@ class SoakReviewTests(unittest.TestCase):
     def test_expected_firmware_version(self):
         rows = samples()
         for row in rows:
-            row["firmware_version"] = "0.2.0-gm1-diag"
-        self.assertEqual(self.review(rows, "0.2.0-gm1-diag")["status"], "PASS")
+            row["firmware_version"] = "0.2.1-diag"
+        self.assertEqual(self.review(rows, "0.2.1-diag")["status"], "PASS")
         for version in ("0.2.0-rc2-diag", ""):
             rows[-1]["firmware_version"] = version
             self.assertIn("unexpected or missing firmware version",
-                          self.review(rows, "0.2.0-gm1-diag")["problems"])
+                          self.review(rows, "0.2.1-diag")["problems"])
 
     def test_no_uart_progress_even_when_fresh_flag_is_stuck(self):
         rows = samples()
@@ -201,7 +201,7 @@ class SoakReviewTests(unittest.TestCase):
             def read(self, limit):
                 return (b"<tr><td>UART task:</td><td>1</td></tr>"
                         b"<tr><td>Valid states:</td><td>42</td></tr>"
-                        b"<tr><td>Firmware version:</td><td>0.2.0-gm1-diag</td></tr>"
+                        b"<tr><td>Firmware version:</td><td>0.2.1-diag</td></tr>"
                         b"<tr><td>Control available:</td><td>1</td></tr>"
                         b"<tr><td>Pending state replies:</td><td>2</td></tr>"
                         b"<tr><td>Lost state replies:</td><td>1</td></tr>"
@@ -212,7 +212,7 @@ class SoakReviewTests(unittest.TestCase):
             row = monitor.sample("http://example.invalid/tion-status")
         self.assertEqual(row["reachable"], "1")
         self.assertEqual(row["valid_states"], "42")
-        self.assertEqual(row["firmware_version"], "0.2.0-gm1-diag")
+        self.assertEqual(row["firmware_version"], "0.2.1-diag")
         self.assertEqual(row["control_available"], "1")
         self.assertEqual(row["pending_state_replies"], "2")
         self.assertEqual(row["lost_state_replies"], "1")
