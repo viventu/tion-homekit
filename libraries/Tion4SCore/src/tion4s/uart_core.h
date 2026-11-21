@@ -92,6 +92,9 @@ struct UartStatus {
   // counted apart from control_failed and from context_failed, which holds
   // failed automatic commands; a refusal refuses no later command.
   std::uint32_t control_refused = 0;
+  // The part of control_refused that no rule of the project explains: the
+  // breezer reported errors or a state that cannot be relayed in a write.
+  std::uint32_t device_refused = 0;
   // A command is running or waiting. It turns false only together with the
   // device state read after the command finished.
   bool control_pending = false;
@@ -214,6 +217,7 @@ class UartCore {
   std::uint32_t failures_ = 0;
   std::uint32_t context_failures_ = 0;
   std::uint32_t refused_ = 0;
+  std::uint32_t device_refused_ = 0;
   CommandResult recent_[UartStatus::kRecentResults]{};
 };
 

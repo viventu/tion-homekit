@@ -129,6 +129,17 @@ class SoakReviewTests(unittest.TestCase):
         self.assertEqual(report["control_failures"], 0)
         self.assertEqual(report["status"], "PASS")
 
+    def test_refusals_caused_by_the_device_state_fail_the_run(self):
+        rows = samples()
+        for row in rows[1:]:
+            row["control_refused"] = "2"
+            row["device_refused"] = "1"
+        report = self.review(rows)
+        self.assertEqual(report["control_refusals"], 2)
+        self.assertEqual(report["device_refusals"], 1)
+        self.assertIn("command refused because of the reported device state",
+                      report["problems"])
+
     def test_refusal_counter_reset_is_detected(self):
         rows = samples()
         for row in rows:
@@ -156,7 +167,8 @@ class SoakReviewTests(unittest.TestCase):
                 self.assertEqual(self.review(rows)["status"], "FAIL")
 
     def test_csv_from_older_monitor_without_new_columns(self):
-        new_fields = {"uart_stack_free_bytes", "uart_stall_restarts", "control_unchanged",
+        new_fields = {"uart_stack_free_bytes", "device_refused",
+                      "uart_stall_restarts", "control_unchanged",
                       "pending_state_replies", "control_available", "firmware_version",
                       "lost_state_replies", "context_failed", "control_refused"}
         fields = [field for field in monitor.FIELDS if field not in new_fields]

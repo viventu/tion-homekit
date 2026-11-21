@@ -131,6 +131,8 @@ void append_uart_diagnostics(String& html) {
   // not failed transactions: nothing was written to the breezer.
   append_row(html, "Control refused", "%lu",
              static_cast<unsigned long>(status.control_refused));
+  append_row(html, "Refused by device state", "%lu",
+             static_cast<unsigned long>(status.device_refused));
   append_row(html, "Context-bound failures", "%lu",
              static_cast<unsigned long>(status.context_failed));
 

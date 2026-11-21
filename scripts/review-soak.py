@@ -79,6 +79,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
     wifi_disconnects = 0
     control_failures = 0
     control_refusals = 0
+    device_refusals = 0
     counter_fields = ("uptime_seconds", "valid_states", "heartbeat_responses",
                       "wifi_disconnects", "rejected_frames", "uart_tx_failures")
     for row in reachable:
@@ -105,6 +106,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         control_failures += max(0, failure_count(current) - failure_count(previous))
         control_failures += optional_delta(previous, current, "context_failed")
         control_refusals += max(0, refusal_count(current) - refusal_count(previous))
+        device_refusals += optional_delta(previous, current, "device_refused")
 
     missed_intervals = sum(
         max(0, round((datetime.fromisoformat(current["timestamp_utc"]) -
@@ -162,6 +164,8 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         problems.append("Tion or UART errors observed")
     if control_failures:
         problems.append("control transaction failed")
+    if device_refusals:
+        problems.append("command refused because of the reported device state")
     if min_free_heap_bytes < 100_000:
         problems.append("minimum free heap below 100 KB")
     if (min_uart_stack_free_bytes is not None and
@@ -194,6 +198,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         "lost_state_replies": lost_state_replies,
         "control_failures": control_failures,
         "control_refusals": control_refusals,
+        "device_refusals": device_refusals,
         "minimum_free_heap_bytes": min_free_heap_bytes,
         "minimum_uart_stack_free_bytes": min_uart_stack_free_bytes,
         "stall_limit_samples": stall_limit_samples,

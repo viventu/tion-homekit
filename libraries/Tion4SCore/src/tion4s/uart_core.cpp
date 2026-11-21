@@ -343,6 +343,10 @@ void UartCore::settle() {
   const bool counted = failed && !refused && !context_bound;
   if (refused) {
     ++refused_;
+    if (result.refusal == WriteRejection::DeviceErrors ||
+        result.refusal == WriteRejection::InvalidBaseline) {
+      ++device_refused_;
+    }
   } else if (counted) {
     ++failures_;
   } else if (failed && result.failure != ControlFailure::ContextChanged) {
@@ -378,6 +382,7 @@ void UartCore::publish(std::uint32_t now_ms) {
   status_.control_failed = failures_;
   status_.context_failed = context_failures_;
   status_.control_refused = refused_;
+  status_.device_refused = device_refused_;
   status_.control_pending = running_ticket_ != 0 || has_waiting_;
   status_.running_ticket = running_ticket_;
   status_.waiting_ticket = has_waiting_ ? waiting_.ticket : 0;
