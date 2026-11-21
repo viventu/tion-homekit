@@ -20,7 +20,7 @@ TION_DIAGNOSTICS=1 scripts/build-homekit.sh
 | Pending state replies | Не остаются необработанные ответы, блокирующие запись дольше 2 с |
 | Lost state replies | Не растёт постоянно; рост означает ответы Tion, не пришедшие за 2 с |
 | TX failures / Rejected frames / Raw errors | Ошибки передачи, разбора кадров и контроллера |
-| Free heap / Minimum free heap / UART stack free | Запас памяти и стека в динамике |
+| Free heap / Minimum free heap / UART stack free / Loop stack free | Запас памяти и стеков обеих задач в динамике |
 | Control available / исходы команд | Доступность управления и результат конкретных действий |
 | Control refused | Отказы по правилам проекта: устройству ничего не отправлено, счётчик растёт отдельно от сбоев |
 | Refused by device state | Часть `Control refused`, вызванная состоянием бризера: ошибки контроллера или состояние, которое нельзя передать в записи. В обычной работе не растёт |

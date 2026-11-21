@@ -698,6 +698,7 @@ void diagnostics_page_reports_the_link() {
             has_row(page, "Control applied / failed", "1 / 0") &&
             has_row(page, "Control refused", "0") &&
             has_row(page, "Refused by device state", "0") &&
+            has_row(page, "Loop stack free (bytes)", "1234") &&
             has_row(page, "UART stall restarts", "2 / limit reached") &&
             has_row(page, "UART stack free (bytes)", "1234"),
         "the page shows device, state, control and adapter rows");

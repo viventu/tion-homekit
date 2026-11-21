@@ -14,6 +14,10 @@
 #include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#if defined(TION_ENABLE_WEB_DIAGNOSTICS)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 
 // The Arduino builder inserts prototypes for the first functions it finds,
 // and where they land depends on the host platform. On one of them they
@@ -92,6 +96,10 @@ void append_uart_diagnostics(String& html) {
   append_row(html, "UART task", "%u", static_cast<unsigned>(platform.task_running));
   append_row(html, "UART stack free (bytes)", "%lu",
              static_cast<unsigned long>(platform.stack_free_bytes));
+  // HomeSpan builds this page on the loop task, so this is the smallest
+  // margin that task has had, including the page itself.
+  append_row(html, "Loop stack free (bytes)", "%lu",
+             static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
   append_row(html, "UART stall restarts", "%lu / %s",
              static_cast<unsigned long>(platform.stall_restarts),
              platform.stall_gave_up ? "limit reached" : "armed");

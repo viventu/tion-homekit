@@ -12,8 +12,8 @@ from pathlib import Path
 
 
 CONNECTED = "Device is Connected to HomeKit"
-# Smallest UART task stack margin accepted during a soak run.
-MIN_UART_STACK_FREE_BYTES = 512
+# Smallest UART and loop task stack margin accepted during a soak run.
+MIN_STACK_FREE_BYTES = 512
 
 
 def number(row: dict[str, str], field: str) -> int:
@@ -48,6 +48,12 @@ def failure_count(row: dict[str, str]) -> int:
 def refusal_count(row: dict[str, str]) -> int:
     """Refusals are reported, never counted as control failures."""
     return optional_number(row, "control_refused") or 0
+
+
+def minimum(rows: list[dict[str, str]], field: str) -> int | None:
+    values = [value for value in (optional_number(row, field) for row in rows)
+              if value is not None]
+    return min(values) if values else None
 
 
 def review(path: Path, expected_hours: float, interval_seconds: float,
@@ -133,9 +139,8 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
     max_heartbeat_age_ms = max(number(row, "heartbeat_tx_age_ms") for row in reachable)
     homekit_disconnected_samples = sum(row["homekit_status"] != CONNECTED
                                       for row in reachable)
-    stack_samples = [value for value in (optional_number(row, "uart_stack_free_bytes")
-                                         for row in reachable) if value is not None]
-    min_uart_stack_free_bytes = min(stack_samples) if stack_samples else None
+    min_uart_stack_free_bytes = minimum(reachable, "uart_stack_free_bytes")
+    min_loop_stack_free_bytes = minimum(reachable, "loop_stack_free_bytes")
     stall_limit_samples = sum(stall_limit_reached(row) for row in reachable)
 
     problems = []
@@ -169,8 +174,11 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
     if min_free_heap_bytes < 100_000:
         problems.append("minimum free heap below 100 KB")
     if (min_uart_stack_free_bytes is not None and
-            min_uart_stack_free_bytes < MIN_UART_STACK_FREE_BYTES):
+            min_uart_stack_free_bytes < MIN_STACK_FREE_BYTES):
         problems.append("UART task stack margin below 512 bytes")
+    if (min_loop_stack_free_bytes is not None and
+            min_loop_stack_free_bytes < MIN_STACK_FREE_BYTES):
+        problems.append("loop task stack margin below 512 bytes")
     if stall_limit_samples:
         problems.append("UART stall restart limit reached")
 
@@ -201,6 +209,7 @@ def review(path: Path, expected_hours: float, interval_seconds: float,
         "device_refusals": device_refusals,
         "minimum_free_heap_bytes": min_free_heap_bytes,
         "minimum_uart_stack_free_bytes": min_uart_stack_free_bytes,
+        "minimum_loop_stack_free_bytes": min_loop_stack_free_bytes,
         "stall_limit_samples": stall_limit_samples,
         "problems": problems,
     }

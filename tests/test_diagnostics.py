@@ -33,7 +33,8 @@ def samples(count=61):
                    homekit_status=soak.CONNECTED, state_fresh="1",
                    control_applied_failed="0 / 0", max_heartbeat_tx_gap_ms="3010",
                    minimum_free_heap_bytes="140000", uptime_seconds=str(10 + index * 60),
-                   uart_stack_free_bytes="1400", uart_stall_restarts="0 / armed",
+                   uart_stack_free_bytes="1400", loop_stack_free_bytes="9000",
+                   uart_stall_restarts="0 / armed",
                    valid_states=str(1 + index * 30), heartbeat_responses=str(1 + index * 20))
         result.append(row)
     return result
@@ -160,6 +161,7 @@ class SoakReviewTests(unittest.TestCase):
 
     def test_uart_stack_and_stall_limit(self):
         for field, value in (("uart_stack_free_bytes", "300"),
+                             ("loop_stack_free_bytes", "300"),
                              ("uart_stall_restarts", "3 / limit reached")):
             with self.subTest(field=field):
                 rows = samples()
@@ -167,7 +169,7 @@ class SoakReviewTests(unittest.TestCase):
                 self.assertEqual(self.review(rows)["status"], "FAIL")
 
     def test_csv_from_older_monitor_without_new_columns(self):
-        new_fields = {"uart_stack_free_bytes", "device_refused",
+        new_fields = {"uart_stack_free_bytes", "loop_stack_free_bytes", "device_refused",
                       "uart_stall_restarts", "control_unchanged",
                       "pending_state_replies", "control_available", "firmware_version",
                       "lost_state_replies", "context_failed", "control_refused"}
@@ -181,6 +183,7 @@ class SoakReviewTests(unittest.TestCase):
             report = soak.review(path, 1, 60)
         self.assertEqual(report["status"], "PASS")
         self.assertIsNone(report["minimum_uart_stack_free_bytes"])
+        self.assertIsNone(report["minimum_loop_stack_free_bytes"])
 
     def test_invalid_duration(self):
         for value in (float("nan"), float("inf"), 0, -1):
