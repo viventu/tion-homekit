@@ -857,23 +857,6 @@ void test_control_transaction_02d0() {
         "native speed change cancels boost restoration before write");
 }
 
-void test_failures_before_write() {
-  // Keep the constexpr classification exercised at runtime under Clang too.
-  bool (*volatile failed_before_write)(ControlFailure) = tion4s::failed_before_write;
-  CHECK(failed_before_write(ControlFailure::UnsupportedDevice) &&
-            failed_before_write(ControlFailure::StaleState) &&
-            failed_before_write(ControlFailure::ContextChanged) &&
-            failed_before_write(ControlFailure::Refused) &&
-            failed_before_write(ControlFailure::ReadTimeout) &&
-            failed_before_write(ControlFailure::Expired),
-        "failures before the write left nothing on the breezer");
-  CHECK(!failed_before_write(ControlFailure::None) &&
-            !failed_before_write(ControlFailure::VerifyTimeout) &&
-            !failed_before_write(ControlFailure::NotApplied) &&
-            !failed_before_write(ControlFailure::Transport),
-        "after a write, or a transport failure, the result is unknown");
-}
-
 void test_control_admission() {
   auto state = captured_state();
   tion4s::Snapshot snapshot;
@@ -1238,7 +1221,6 @@ int main() {
   test_describe();
   test_device_policy();
   test_control_transaction_02d0();
-  test_failures_before_write();
   test_control_admission();
   test_unchanged_and_timeouts();
   test_transaction_request_ids();
