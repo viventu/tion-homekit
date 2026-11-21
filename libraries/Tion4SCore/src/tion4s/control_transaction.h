@@ -37,16 +37,6 @@ enum class ControlFailure : std::uint8_t {
   Expired,            // The intent aged out before its write was sent.
 };
 
-// The write never left: the breezer still has the state its pre-read, or
-// the snapshot the command was admitted from, showed. A transport failure
-// may have happened during the write and does not count.
-constexpr bool failed_before_write(ControlFailure failure) {
-  return failure == ControlFailure::UnsupportedDevice ||
-         failure == ControlFailure::StaleState || failure == ControlFailure::ContextChanged ||
-         failure == ControlFailure::Refused || failure == ControlFailure::ReadTimeout ||
-         failure == ControlFailure::Expired;
-}
-
 struct ControlOutput {
   ControlStep step = ControlStep::None;
   std::uint8_t bytes[kStateWriteFrameSize]{};
